@@ -206,6 +206,7 @@ model ProjectTimeEntry {
   @@index([internalProjectId])
   @@index([internalEmployeeId])
   @@index([date])
+  @@index([internalProjectId, date])
   @@map("project_time_entries")
 }
 

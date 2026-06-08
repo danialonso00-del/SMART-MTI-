@@ -32,20 +32,11 @@ export async function GET(
       take: 20,
     });
 
-    // Company salary totals (last month)
-    const now = new Date();
-    const latestSalaries = await prisma.salary.findMany({
-      where: {
-        year:  now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear(),
-        month: now.getMonth() === 0 ? 12 : now.getMonth(),
-        employee: { company: opportunity.company },
-      },
-      include: { employee: true },
-    });
-
-    const totalMonthlySalary = latestSalaries.reduce((s, sal) => s + sal.salaryReal, 0);
-    const avgCostHour = latestSalaries.length > 0
-      ? latestSalaries.reduce((s, sal) => s + sal.costHour, 0) / latestSalaries.length
+    // Derive company salary totals from the employees already loaded above (latest salary = salaries[0])
+    const totalMonthlySalary = employees.reduce((s, emp) => s + (emp.salaries[0]?.salaryReal ?? 0), 0);
+    const costHours = employees.map(emp => emp.salaries[0]?.costHour).filter((v): v is number => v != null && v > 0);
+    const avgCostHour = costHours.length > 0
+      ? costHours.reduce((s, c) => s + c, 0) / costHours.length
       : 0;
 
     const factorialMapping = await prisma.factorialProjectMapping.findUnique({

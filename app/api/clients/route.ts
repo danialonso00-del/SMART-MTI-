@@ -3,36 +3,28 @@ import { prisma } from '@/lib/prisma';
 
 export async function GET() {
   try {
-    // Obtener clientes con sus métricas agregadas de opportunities
-    const clients = await prisma.client.findMany({
-      orderBy: { name: 'asc' },
+    const [clients, opportunityMetrics] = await Promise.all([
+      prisma.client.findMany({ orderBy: { name: 'asc' } }),
+      prisma.opportunity.groupBy({
+        by: ['client', 'statusCode'],
+        _sum: { amount: true, totalInvoiced: true, pendingToInvoice: true },
+        _count: true,
+      }),
+    ]);
+
+    const clientsWithMetrics = clients.map((client) => {
+      const rows = opportunityMetrics.filter(r => r.client === client.name);
+      const totalAmount        = rows.reduce((s, r) => s + (r._sum.amount          ?? 0), 0);
+      const totalInvoiced      = rows.reduce((s, r) => s + (r._sum.totalInvoiced   ?? 0), 0);
+      const pendingToInvoice   = rows.reduce((s, r) => s + (r._sum.pendingToInvoice ?? 0), 0);
+      const projectsCount      = rows.filter(r => [6, 7, 8].includes(r.statusCode)).reduce((s, r) => s + r._count, 0);
+      const opportunitiesCount = rows.filter(r => [2, 3, 4, 5].includes(r.statusCode)).reduce((s, r) => s + r._count, 0);
+      return { ...client, totalAmount, totalInvoiced, pendingToInvoice, projectsCount, opportunitiesCount };
     });
 
-    // Agregar métricas de oportunidades por cliente
-    const clientsWithMetrics = await Promise.all(
-      clients.map(async (client) => {
-        const opportunities = await prisma.opportunity.findMany({
-          where: { client: client.name },
-        });
-
-        const totalAmount     = opportunities.reduce((s, o) => s + o.amount, 0);
-        const totalInvoiced   = opportunities.reduce((s, o) => s + o.totalInvoiced, 0);
-        const pendingToInvoice = opportunities.reduce((s, o) => s + o.pendingToInvoice, 0);
-        const projectsCount   = opportunities.filter(o => [6, 7, 8].includes(o.statusCode)).length;
-        const opportunitiesCount = opportunities.filter(o => [2, 3, 4, 5].includes(o.statusCode)).length;
-
-        return {
-          ...client,
-          totalAmount,
-          totalInvoiced,
-          pendingToInvoice,
-          projectsCount,
-          opportunitiesCount,
-        };
-      })
-    );
-
-    return NextResponse.json(clientsWithMetrics);
+    return NextResponse.json(clientsWithMetrics, {
+      headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=300' },
+    });
   } catch (error) {
     console.error('Error fetching clients:', error);
     return NextResponse.json({ error: 'Error al obtener clientes' }, { status: 500 });
