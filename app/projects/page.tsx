@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, LayoutGrid, List, ChevronUp, ChevronDown, Zap, Pencil } from 'lucide-react';
+import { Search, LayoutGrid, List, ChevronUp, ChevronDown, Zap, Pencil, Trash2 } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
 import StatusSelect from '@/components/ui/StatusSelect';
 import CompanyBadge from '@/components/ui/CompanyBadge';
 import PageHeader from '@/components/ui/PageHeader';
 import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
+import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
 import { StatusCode } from '@/lib/types';
 import { formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
 
@@ -106,7 +107,7 @@ function MarginBadge({ project }: { project: Project }) {
   return <span className={cn('text-xs font-bold tabular-nums', color)}>{margin.toFixed(1)}%</span>;
 }
 
-function ProjectCard({ project, onClick, onEdit }: { project: Project; onClick: () => void; onEdit: () => void }) {
+function ProjectCard({ project, onClick, onEdit, onDelete }: { project: Project; onClick: () => void; onEdit: () => void; onDelete: () => void }) {
   const totalCosts = (project.peopleCost ?? 0) + (project.materialCost ?? 0) + (project.costs ?? 0);
   const hasCosts = totalCosts > 0;
   const margin = hasCosts && project.amount > 0 ? ((project.amount - totalCosts) / project.amount) * 100 : null;
@@ -137,6 +138,13 @@ function ProjectCard({ project, onClick, onEdit }: { project: Project; onClick: 
             className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
           >
             <Pencil size={13} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            title="Eliminar"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 size={13} />
           </button>
         </div>
       </div>
@@ -215,6 +223,7 @@ export default function ProjectsPage() {
   const [error, setError]     = useState<string | null>(null);
   const [search, setSearch]   = useState('');
   const [editingProj, setEditingProj] = useState<Project | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusCode | 'all'>('all');
   const [viewMode, setViewMode]         = useState<'grid' | 'list'>('grid');
   const [sortKey, setSortKey]           = useState<SortKey>('id');
@@ -306,6 +315,16 @@ export default function ProjectsPage() {
     );
   }
 
+  async function handleDelete(id: string) {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Error al eliminar');
+    }
+    setData(prev => prev.filter(p => p.id !== id));
+    setDeleteTarget(null);
+  }
+
   return (
     <div className="space-y-4 pb-8">
       {editingProj && (
@@ -316,6 +335,14 @@ export default function ProjectsPage() {
             setData(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } as Project : p));
             setEditingProj(null);
           }}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          id={deleteTarget.id}
+          name={deleteTarget.name}
+          onConfirm={() => handleDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
         />
       )}
       <PageHeader
@@ -411,6 +438,7 @@ export default function ProjectsPage() {
               project={project}
               onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)}
               onEdit={() => setEditingProj(project)}
+              onDelete={() => setDeleteTarget({ id: project.id, name: project.opportunity })}
             />
           ))}
           {filtered.length === 0 && !loading && (
@@ -493,13 +521,22 @@ export default function ProjectsPage() {
                       {project.endDate ? formatDate(project.endDate) : '—'}
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditingProj(project); }}
-                        title="Editar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                      >
-                        <Pencil size={13} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingProj(project); }}
+                          title="Editar"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.opportunity }); }}
+                          title="Eliminar"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

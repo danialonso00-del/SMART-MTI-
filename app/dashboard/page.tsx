@@ -15,7 +15,7 @@ import KpiCard from '@/components/ui/KpiCard';
 import StatusBadge from '@/components/ui/StatusBadge';
 import CompanyBadge from '@/components/ui/CompanyBadge';
 import PageHeader from '@/components/ui/PageHeader';
-import { formatCurrencyCompact, formatDate, truncate, cn } from '@/lib/utils';
+import { formatCurrency, formatCurrencyCompact, formatDate, truncate, cn } from '@/lib/utils';
 import { StatusCode } from '@/lib/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -621,10 +621,10 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <KpiCard label="Total Pipeline"    value={formatCurrencyCompact(totals.totalPipeline)}    subtitle="Excluyendo perdidos"         icon={<TrendingUp size={22} />} color="amber" />
-          <KpiCard label="Pipeline Ponderado" value={formatCurrencyCompact(totals.weightedPipeline)} subtitle="Ajustado por probabilidad"   icon={<Target size={22} />}    color="blue" />
-          <KpiCard label="Total Aceptado"    value={formatCurrencyCompact(totals.totalAccepted)}    subtitle="Status 6, 7 y 8"             icon={<CheckCircle size={22} />} color="emerald" />
-          <KpiCard label="Total Facturado"   value={formatCurrencyCompact(totals.totalInvoiced)}    subtitle="Ingresos realizados"         icon={<Receipt size={22} />}   color="violet" />
+          <KpiCard label="Total Pipeline"    value={formatCurrencyCompact(totals.totalPipeline)}    tooltip={formatCurrency(totals.totalPipeline)}    subtitle="Excluyendo perdidos"         icon={<TrendingUp size={22} />} color="amber" />
+          <KpiCard label="Pipeline Ponderado" value={formatCurrencyCompact(totals.weightedPipeline)} tooltip={formatCurrency(totals.weightedPipeline)} subtitle="Ajustado por probabilidad"   icon={<Target size={22} />}    color="blue" />
+          <KpiCard label="Total Aceptado"    value={formatCurrencyCompact(totals.totalAccepted)}    tooltip={formatCurrency(totals.totalAccepted)}    subtitle="Status 6, 7 y 8"             icon={<CheckCircle size={22} />} color="emerald" />
+          <KpiCard label="Total Facturado"   value={formatCurrencyCompact(totals.totalInvoiced)}    tooltip={formatCurrency(totals.totalInvoiced)}    subtitle="Ingresos realizados"         icon={<Receipt size={22} />}   color="violet" />
           <KpiCard label="Tasa de Éxito"     value={`${winRate.toFixed(1)}%`}                       subtitle="Oports. ganadas vs resueltas" icon={<Trophy size={22} />}    color="teal" />
         </div>
       )}

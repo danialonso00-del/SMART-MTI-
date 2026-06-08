@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, AlertCircle, Calendar, Users, DollarSign, X,
   TrendingUp, TrendingDown, FileText, Clock, BarChart2, Building2, CheckCircle,
-  RefreshCw, Zap, TriangleAlert, Info, Receipt, FolderOpen, ExternalLink, Loader2,
+  RefreshCw, Zap, TriangleAlert, Info, Receipt, FolderOpen, ExternalLink, Loader2, Trash2,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import StatusSelect from '@/components/ui/StatusSelect';
 import CompanyBadge from '@/components/ui/CompanyBadge';
+import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
 import { StatusCode } from '@/lib/types';
 import {
   formatCurrency, formatCurrencyCompact, formatDate, formatPercent,
@@ -189,6 +190,7 @@ export default function ProjectDetailPage() {
   const [otherCostsEdit, setOtherCostsEdit]     = useState(0);
   const [savingCosts, setSavingCosts]           = useState(false);
   const [saveCostsMsg, setSaveCostsMsg]         = useState('');
+  const [showDelete, setShowDelete]             = useState(false);
 
   interface AccountingEntry {
     id: string; accountCode: string; accountName: string;
@@ -469,6 +471,15 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleDelete() {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Error al eliminar');
+    }
+    router.push('/projects');
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -599,6 +610,15 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {showDelete && (
+        <DeleteConfirmModal
+          id={opp.id}
+          name={opp.opportunity}
+          onConfirm={handleDelete}
+          onClose={() => setShowDelete(false)}
+        />
+      )}
+
       {/* Back */}
       <button
         onClick={() => router.push('/projects')}
@@ -642,6 +662,12 @@ export default function ProjectDetailPage() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap mt-3 sm:mt-0">
+            <button
+              onClick={() => setShowDelete(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors"
+            >
+              <Trash2 size={13} /> Eliminar
+            </button>
             {/* Google Drive button */}
             {driveUrl ? (
               <a

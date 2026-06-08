@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Filter, Download, ChevronUp, ChevronDown, X, LayoutList, Kanban, Pencil } from 'lucide-react';
+import { Search, Plus, Filter, Download, ChevronUp, ChevronDown, X, LayoutList, Kanban, Pencil, Trash2 } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
 import StatusSelect from '@/components/ui/StatusSelect';
 import CompanyBadge from '@/components/ui/CompanyBadge';
 import PageHeader from '@/components/ui/PageHeader';
 import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
+import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
 import { StatusCode } from '@/lib/types';
 import { formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
 
@@ -67,6 +68,7 @@ export default function OpportunitiesPage() {
   const router = useRouter();
   const [data, setData] = useState<Opportunity[]>([]);
   const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<number | 'all'>('all');
@@ -145,6 +147,16 @@ export default function OpportunitiesPage() {
     items: filtered.filter(o => o.statusCode === code),
   }));
 
+  async function handleDelete(id: string) {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Error al eliminar');
+    }
+    setData(prev => prev.filter(o => o.id !== id));
+    setDeleteTarget(null);
+  }
+
   return (
     <div className="space-y-4 pb-8">
       {editingOpp && (
@@ -155,6 +167,14 @@ export default function OpportunitiesPage() {
             setData(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
             setEditingOpp(null);
           }}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          id={deleteTarget.id}
+          name={deleteTarget.name}
+          onConfirm={() => handleDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
         />
       )}
       <PageHeader
@@ -410,13 +430,22 @@ export default function OpportunitiesPage() {
                         </div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <button
-                          onClick={e => { e.stopPropagation(); setEditingOpp(opp); }}
-                          title="Editar"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                        >
-                          <Pencil size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={e => { e.stopPropagation(); setEditingOpp(opp); }}
+                            title="Editar"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={e => { e.stopPropagation(); setDeleteTarget({ id: opp.id, name: opp.opportunity }); }}
+                            title="Eliminar"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -466,6 +495,12 @@ export default function OpportunitiesPage() {
                           className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                         >
                           <Pencil size={11} />
+                        </button>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeleteTarget({ id: opp.id, name: opp.opportunity }); }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 size={11} />
                         </button>
                       </div>
                     </div>

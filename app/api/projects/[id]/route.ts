@@ -80,6 +80,39 @@ export async function GET(
   }
 }
 
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const id = decodeURIComponent(params.id);
+
+    const existing = await prisma.opportunity.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Proyecto no encontrado' }, { status: 404 });
+    }
+
+    await prisma.$transaction([
+      // 1. Activity logs (polymorphic, no FK)
+      prisma.activityLog.deleteMany({ where: { entityType: 'opportunity', entityId: id } }),
+      // 2. Billing config cascade → milestones
+      prisma.billingConfig.deleteMany({ where: { internalProjectId: id } }),
+      // 3. Nullify accounting entries (optional FK)
+      prisma.accountingEntry.updateMany({
+        where: { internalProjectId: id },
+        data: { internalProjectId: null },
+      }),
+      // 4. Delete the opportunity
+      prisma.opportunity.delete({ where: { id } }),
+    ]);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting project:', error);
+    return NextResponse.json({ error: 'Error al eliminar proyecto' }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }

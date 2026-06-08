@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Download, ChevronUp, ChevronDown, Pencil } from 'lucide-react';
+import { Search, Plus, Download, ChevronUp, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import StatusSelect from '@/components/ui/StatusSelect';
 import CompanyBadge from '@/components/ui/CompanyBadge';
 import PageHeader from '@/components/ui/PageHeader';
 import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
-import { formatCurrencyCompact, formatDate, cn } from '@/lib/utils';
+import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
+import { formatCurrency, formatCurrencyCompact, formatDate, cn } from '@/lib/utils';
 import type { StatusCode } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -178,11 +179,11 @@ function SummaryBar({ rows }: { rows: Opportunity[] }) {
     <div className="flex items-center gap-5 bg-white border border-slate-200 rounded-xl px-5 py-3 shadow-sm mb-4 flex-wrap">
       {stat('Registros', String(count))}
       <div className="w-px h-7 bg-slate-200" />
-      {stat('Importe Total', formatCurrencyCompact(total))}
+      {stat('Importe Total', formatCurrency(total))}
       <div className="w-px h-7 bg-slate-200" />
-      {stat('Facturado', formatCurrencyCompact(invoiced), 'text-emerald-600')}
+      {stat('Facturado', formatCurrency(invoiced), 'text-emerald-600')}
       <div className="w-px h-7 bg-slate-200" />
-      {stat('Ponderado', formatCurrencyCompact(weighted), 'text-blue-600')}
+      {stat('Ponderado', formatCurrency(weighted), 'text-blue-600')}
     </div>
   );
 }
@@ -238,6 +239,7 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   function updateRowStatus(id: string, newCode: StatusCode) {
     setData(prev => prev.map(r => r.id === id ? { ...r, statusCode: newCode } : r));
@@ -334,6 +336,16 @@ export default function PipelinePage() {
   // Count per status
   const statusCount = (code: number) => data.filter(r => r.statusCode === code).length;
 
+  async function handleDelete(id: string) {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Error al eliminar');
+    }
+    setData(prev => prev.filter(r => r.id !== id));
+    setDeleteTarget(null);
+  }
+
   return (
     <div className="pb-10">
       {editingOpp && (
@@ -344,6 +356,14 @@ export default function PipelinePage() {
             setData(prev => prev.map(r => r.id === updated.id ? { ...r, ...updated } as Opportunity : r));
             setEditingOpp(null);
           }}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          id={deleteTarget.id}
+          name={deleteTarget.name}
+          onConfirm={() => handleDelete(deleteTarget.id)}
+          onClose={() => setDeleteTarget(null)}
         />
       )}
       {/* Header */}
@@ -593,14 +613,14 @@ export default function PipelinePage() {
 
                       {/* Importe */}
                       <td className="px-3 py-2 text-right font-bold text-slate-900 whitespace-nowrap tabular-nums">
-                        {formatCurrencyCompact(row.amount)}
+                        {formatCurrency(row.amount)}
                       </td>
 
                       {/* Ponderado */}
                       <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                         {row.weightedPipeline > 0 ? (
                           <span className="text-blue-600 font-medium">
-                            {formatCurrencyCompact(row.weightedPipeline)}
+                            {formatCurrency(row.weightedPipeline)}
                           </span>
                         ) : (
                           <span className="text-slate-300">—</span>
@@ -611,7 +631,7 @@ export default function PipelinePage() {
                       <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                         {row.totalInvoiced > 0 ? (
                           <span className="text-emerald-600 font-medium">
-                            {formatCurrencyCompact(row.totalInvoiced)}
+                            {formatCurrency(row.totalInvoiced)}
                           </span>
                         ) : (
                           <span className="text-slate-300">—</span>
@@ -622,7 +642,7 @@ export default function PipelinePage() {
                       <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                         {row.pendingToInvoice > 0 ? (
                           <span className="text-amber-600 font-medium">
-                            {formatCurrencyCompact(row.pendingToInvoice)}
+                            {formatCurrency(row.pendingToInvoice)}
                           </span>
                         ) : (
                           <span className="text-slate-300">—</span>
@@ -646,15 +666,24 @@ export default function PipelinePage() {
                           statusCode={row.statusCode}
                         />
                       </td>
-                      {/* Edit */}
+                      {/* Actions */}
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <button
-                          onClick={e => { e.stopPropagation(); setEditingOpp(row); }}
-                          title="Editar"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                        >
-                          <Pencil size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={e => { e.stopPropagation(); setEditingOpp(row); }}
+                            title="Editar"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={e => { e.stopPropagation(); setDeleteTarget({ id: row.id, name: row.opportunity }); }}
+                            title="Eliminar"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -675,16 +704,16 @@ export default function PipelinePage() {
                     <td className="px-3 py-2.5" colSpan={3} />
                     <td className="px-3 py-2.5" />
                     <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap">
-                      {formatCurrencyCompact(totAmount)}
+                      {formatCurrency(totAmount)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold tabular-nums text-blue-300 whitespace-nowrap">
-                      {formatCurrencyCompact(totWeighted)}
+                      {formatCurrency(totWeighted)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold tabular-nums text-emerald-300 whitespace-nowrap">
-                      {totInvoiced > 0 ? formatCurrencyCompact(totInvoiced) : '—'}
+                      {totInvoiced > 0 ? formatCurrency(totInvoiced) : '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold tabular-nums text-amber-300 whitespace-nowrap">
-                      {totPending > 0 ? formatCurrencyCompact(totPending) : '—'}
+                      {totPending > 0 ? formatCurrency(totPending) : '—'}
                     </td>
                     <td className="px-3 py-2.5" colSpan={4} />
                   </tr>

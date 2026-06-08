@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 interface KpiCardProps {
   label: string;
   value: string;
+  tooltip?: string;
   subtitle?: string;
   change?: number;
   changeLabel?: string;
@@ -55,6 +56,7 @@ const colorMap = {
 export default function KpiCard({
   label,
   value,
+  tooltip,
   subtitle,
   change,
   changeLabel,
@@ -79,9 +81,19 @@ export default function KpiCard({
           <p className={cn('text-slate-500 font-medium mb-1', size === 'sm' ? 'text-xs' : 'text-sm')}>
             {label}
           </p>
-          <p className={cn('font-bold text-slate-900 truncate', size === 'sm' ? 'text-xl' : 'text-2xl')}>
-            {value}
-          </p>
+          <div className="relative group/tooltip">
+            <p className={cn('font-bold text-slate-900 truncate', size === 'sm' ? 'text-xl' : 'text-2xl')}>
+              {value}
+            </p>
+            {tooltip && (
+              <div className="absolute bottom-full left-0 mb-1.5 hidden group-hover/tooltip:block z-50 pointer-events-none">
+                <div className="bg-slate-800 text-white text-sm font-medium px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
+                  {tooltip}
+                </div>
+                <div className="w-2 h-2 bg-slate-800 rotate-45 ml-3 -mt-1" />
+              </div>
+            )}
+          </div>
           {subtitle && (
             <p className="text-xs text-slate-400 mt-0.5 truncate">{subtitle}</p>
           )}
