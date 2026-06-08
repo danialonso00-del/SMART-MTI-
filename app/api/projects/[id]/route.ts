@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { STATUS_PROB } from '@/lib/utils';
 
 export async function GET(
   req: NextRequest,
@@ -100,9 +101,17 @@ export async function PATCH(
         expectedClosingDate: body.expectedClosingDate ? new Date(body.expectedClosingDate) : undefined,
         acceptanceDate:      body.acceptanceDate      ? new Date(body.acceptanceDate)      : undefined,
         endDate:             body.endDate             ? new Date(body.endDate)             : undefined,
-        weightedPipeline:    body.amount !== undefined || body.probability !== undefined
-          ? ((body.amount ?? existing.amount) * ((body.probability ?? existing.probability) / 100))
-          : undefined,
+        // Auto-calcula probability cuando cambia statusCode (si no se pasa probability explícita)
+        probability: body.statusCode !== undefined && body.probability === undefined
+          ? (STATUS_PROB[body.statusCode] ?? existing.probability)
+          : body.probability ?? undefined,
+        weightedPipeline: (() => {
+          const amt  = body.amount      ?? existing.amount;
+          const prob = body.probability ?? (body.statusCode !== undefined ? (STATUS_PROB[body.statusCode] ?? existing.probability) : existing.probability);
+          return body.amount !== undefined || body.probability !== undefined || body.statusCode !== undefined
+            ? amt * prob / 100
+            : undefined;
+        })(),
         pendingToInvoice:    body.amount !== undefined || body.totalInvoiced !== undefined
           ? Math.max(0, (body.amount ?? existing.amount) - (body.totalInvoiced ?? existing.totalInvoiced))
           : undefined,

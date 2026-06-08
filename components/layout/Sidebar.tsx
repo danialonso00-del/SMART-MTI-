@@ -10,8 +10,7 @@ import {
   Receipt,
   BookOpen,
   Users,
-  UserCheck,
-  Calendar,
+  Building2,
   Upload,
   Plug,
   Settings,
@@ -33,6 +32,7 @@ const navItems = [
   { label: 'Pipeline', href: '/pipeline', icon: TrendingUp },
   { label: 'Oportunidades', href: '/opportunities', icon: Target },
   { label: 'Proyectos', href: '/projects', icon: FolderOpen },
+  { label: 'Servicios', href: '/services', icon: Building2 },
   { label: 'Facturación', href: '/billing', icon: Receipt },
   { label: 'Contabilidad', href: '/accounting', icon: BookOpen },
   { label: 'Clientes', href: '/clients', icon: Users },
@@ -94,7 +94,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             Principal
           </p>
 
-          {navItems.slice(0, 7).map((item) => {
+          {navItems.slice(0, 8).map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
@@ -128,7 +128,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider px-3 mb-3">
               Sistema
             </p>
-            {navItems.slice(7).map((item) => {
+            {navItems.slice(8).map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
               return (

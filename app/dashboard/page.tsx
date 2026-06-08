@@ -212,6 +212,7 @@ export default function DashboardPage() {
   const [activeCompany, setActiveCompany] = useState<string>('all');
   const [year, setYear]                 = useState<number | 'all'>('all');
   const [quarter, setQuarter]           = useState<number | 'all'>('all');
+  const [month, setMonth]               = useState<number | 'all'>('all');
 
   useEffect(() => {
     Promise.all([
@@ -239,10 +240,11 @@ export default function DashboardPage() {
     if (activeCompany !== 'all') data = data.filter(o => o.company === activeCompany);
     if (year !== 'all')          data = data.filter(o => oppYear(o) === year);
     if (quarter !== 'all')       data = data.filter(o => oppQuarter(o) === quarter);
+    if (month !== 'all')         data = data.filter(o => new Date(oppEffectiveDate(o)).getMonth() + 1 === month);
     return data;
-  }, [allOpps, activeBL, activeCompany, year, quarter]);
+  }, [allOpps, activeBL, activeCompany, year, quarter, month]);
 
-  const isFiltered = activeBL !== 'all' || activeCompany !== 'all' || year !== 'all' || quarter !== 'all';
+  const isFiltered = activeBL !== 'all' || activeCompany !== 'all' || year !== 'all' || quarter !== 'all' || month !== 'all';
 
   // ── KPI Computations ─────────────────────────────────────────────────────────
 
@@ -406,14 +408,19 @@ export default function DashboardPage() {
   }, [allOpps]);
 
   // Period subtitle
+  const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
   const periodLabel = useMemo(() => {
     const y = year !== 'all' ? String(year) : null;
     const q = quarter !== 'all' ? `Q${quarter}` : null;
+    const m = month !== 'all' ? MONTH_NAMES[(month as number) - 1] : null;
+    if (y && m) return `${m} ${y}`;
     if (y && q) return `${q} ${y}`;
     if (y)      return y;
+    if (m)      return `${m} · todos los años`;
     if (q)      return `${q} · todos los años`;
     return String(availableYears[0] ?? new Date().getFullYear());
-  }, [year, quarter, availableYears]);
+  }, [year, quarter, month, availableYears]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -492,7 +499,7 @@ export default function DashboardPage() {
               {[1, 2, 3, 4].map(q => (
                 <button
                   key={q}
-                  onClick={() => setQuarter(quarter === q ? 'all' : q)}
+                  onClick={() => { setQuarter(quarter === q ? 'all' : q); setMonth('all'); }}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all',
                     quarter === q
@@ -503,6 +510,44 @@ export default function DashboardPage() {
                   Q{q}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-slate-200" />
+
+          {/* Month selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Mes</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setMonth('all')}
+                className={cn(
+                  'px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                  month === 'all'
+                    ? 'bg-slate-800 text-white border-slate-800'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                )}
+              >
+                Todos
+              </button>
+              {MONTH_NAMES.map((name, i) => {
+                const m = i + 1;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => { setMonth(month === m ? 'all' : m); setQuarter('all'); }}
+                    className={cn(
+                      'px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                      month === m
+                        ? 'bg-amber-500 text-white border-amber-500'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300'
+                    )}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

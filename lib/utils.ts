@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Probabilidad fija por estado — fuente de verdad para toda la app
+export const STATUS_PROB: Record<number, number> = {
+  1: 100, 2: 5, 3: 20, 4: 40, 5: 60, 6: 100, 7: 100, 8: 100, 9: 0, 10: 0,
+};
+
 export function formatCurrency(amount: number, currency = 'EUR'): string {
   return new Intl.NumberFormat('es-ES', {
     style: 'currency',

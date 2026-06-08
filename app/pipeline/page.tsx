@@ -46,22 +46,27 @@ interface Opportunity {
 // Constants
 // ---------------------------------------------------------------------------
 
-type TabKey = 'all' | 'opportunities' | 'projects' | 'finished';
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'all',          label: 'Todas' },
-  { key: 'opportunities', label: 'Oportunidades' },
-  { key: 'projects',     label: 'Proyectos' },
-  { key: 'finished',     label: 'Finalizados / Perdidos' },
+const STATUS_CONFIG: { code: number; label: string; short: string; color: string; bg: string }[] = [
+  { code: 2, label: 'Opportunity',          short: 'Oport.',   color: 'text-sky-600',     bg: 'bg-sky-50 border-sky-200 hover:border-sky-400' },
+  { code: 3, label: 'Requirements Gathering', short: 'Req. G', color: 'text-blue-600',    bg: 'bg-blue-50 border-blue-200 hover:border-blue-400' },
+  { code: 4, label: 'Solution Definition',  short: 'Sol. D',   color: 'text-violet-600',  bg: 'bg-violet-50 border-violet-200 hover:border-violet-400' },
+  { code: 5, label: 'Contract Negotiation', short: 'Neg.',     color: 'text-amber-600',   bg: 'bg-amber-50 border-amber-200 hover:border-amber-400' },
+  { code: 6, label: 'Won',                  short: 'Won',      color: 'text-green-600',   bg: 'bg-green-50 border-green-200 hover:border-green-400' },
+  { code: 7, label: 'Delivering',           short: 'Deliv.',   color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200 hover:border-emerald-400' },
+  { code: 8, label: 'Finished',             short: 'Final.',   color: 'text-slate-600',   bg: 'bg-slate-50 border-slate-200 hover:border-slate-400' },
+  { code: 9, label: 'Lost',                 short: 'Perdido',  color: 'text-red-500',     bg: 'bg-red-50 border-red-200 hover:border-red-400' },
 ];
 
-function matchesTab(statusCode: number, tab: TabKey): boolean {
-  if (tab === 'all')           return true;
-  if (tab === 'opportunities') return statusCode >= 2 && statusCode <= 5;
-  if (tab === 'projects')      return statusCode === 6 || statusCode === 7;
-  if (tab === 'finished')      return statusCode === 8 || statusCode === 9;
-  return true;
-}
+const ACTIVE_COLORS: Record<number, string> = {
+  2: 'bg-sky-500 border-sky-500 text-white',
+  3: 'bg-blue-500 border-blue-500 text-white',
+  4: 'bg-violet-500 border-violet-500 text-white',
+  5: 'bg-amber-500 border-amber-500 text-white',
+  6: 'bg-green-500 border-green-500 text-white',
+  7: 'bg-emerald-500 border-emerald-500 text-white',
+  8: 'bg-slate-500 border-slate-500 text-white',
+  9: 'bg-red-500 border-red-500 text-white',
+};
 
 // ---------------------------------------------------------------------------
 // BL dots
@@ -238,12 +243,21 @@ export default function PipelinePage() {
     setData(prev => prev.map(r => r.id === id ? { ...r, statusCode: newCode } : r));
   }
 
-  const [activeTab, setActiveTab]       = useState<TabKey>('all');
+  // Empty set = show all statuses
+  const [activeStatuses, setActiveStatuses] = useState<Set<number>>(new Set());
   const [search, setSearch]             = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [ownerFilter, setOwnerFilter]   = useState('all');
   const [sortKey, setSortKey]           = useState<'id' | 'amount' | 'client' | 'none'>('id');
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('asc');
+
+  function toggleStatus(code: number) {
+    setActiveStatuses(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code); else next.add(code);
+      return next;
+    });
+  }
 
   function handleSort(key: typeof sortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -288,7 +302,7 @@ export default function PipelinePage() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const rows = data.filter((r) => {
-      if (!matchesTab(r.statusCode, activeTab)) return false;
+      if (activeStatuses.size > 0 && !activeStatuses.has(r.statusCode)) return false;
       if (companyFilter !== 'all' && r.company !== companyFilter) return false;
       if (ownerFilter !== 'all' && r.owner !== ownerFilter) return false;
       if (q) {
@@ -315,10 +329,10 @@ export default function PipelinePage() {
       if (sortDir === 'asc') return av < bv ? -1 : av > bv ? 1 : 0;
       return av > bv ? -1 : av < bv ? 1 : 0;
     });
-  }, [data, activeTab, search, companyFilter, ownerFilter, sortKey, sortDir]);
+  }, [data, activeStatuses, search, companyFilter, ownerFilter, sortKey, sortDir]);
 
-  // Tab counts
-  const tabCount = (key: TabKey) => data.filter((r) => matchesTab(r.statusCode, key)).length;
+  // Count per status
+  const statusCount = (code: number) => data.filter(r => r.statusCode === code).length;
 
   return (
     <div className="pb-10">
@@ -349,30 +363,45 @@ export default function PipelinePage() {
         }
       />
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 mb-4 bg-white border border-slate-200 rounded-xl p-1 w-fit shadow-sm">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap',
-              activeTab === tab.key
-                ? 'bg-slate-800 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-            )}
-          >
-            {tab.label}
-            <span
+      {/* Status multi-select chips */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <button
+          onClick={() => setActiveStatuses(new Set())}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+            activeStatuses.size === 0
+              ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+          )}
+        >
+          Todos
+          <span className={cn('text-xs rounded-full px-1.5 py-px font-bold',
+            activeStatuses.size === 0 ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+          )}>
+            {data.length}
+          </span>
+        </button>
+        {STATUS_CONFIG.map(s => {
+          const active = activeStatuses.has(s.code);
+          const count = statusCount(s.code);
+          return (
+            <button
+              key={s.code}
+              onClick={() => toggleStatus(s.code)}
               className={cn(
-                'text-xs rounded-full px-1.5 py-px font-bold',
-                activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all',
+                active ? ACTIVE_COLORS[s.code] : s.bg
               )}
             >
-              {tabCount(tab.key)}
-            </span>
-          </button>
-        ))}
+              <span className={active ? 'text-white' : s.color}>{s.short}</span>
+              <span className={cn('text-xs rounded-full px-1.5 py-px font-bold',
+                active ? 'bg-white/20 text-white' : `${s.color} bg-white/80`
+              )}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Summary bar */}
@@ -631,6 +660,37 @@ export default function PipelinePage() {
                   );
                 })}
             </tbody>
+            {/* Totals row */}
+            {!loading && !error && filtered.length > 0 && (() => {
+              const totAmount    = filtered.reduce((s, r) => s + (r.amount ?? 0), 0);
+              const totWeighted  = filtered.reduce((s, r) => s + (r.weightedPipeline ?? 0), 0);
+              const totInvoiced  = filtered.reduce((s, r) => s + (r.totalInvoiced ?? 0), 0);
+              const totPending   = filtered.reduce((s, r) => s + (r.pendingToInvoice ?? 0), 0);
+              return (
+                <tfoot>
+                  <tr className="bg-slate-800 text-white border-t-2 border-slate-300">
+                    <td className="px-3 py-2.5 font-semibold text-xs text-slate-300 whitespace-nowrap" colSpan={2}>
+                      TOTAL · {filtered.length} registro{filtered.length !== 1 ? 's' : ''}
+                    </td>
+                    <td className="px-3 py-2.5" colSpan={3} />
+                    <td className="px-3 py-2.5" />
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap">
+                      {formatCurrencyCompact(totAmount)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums text-blue-300 whitespace-nowrap">
+                      {formatCurrencyCompact(totWeighted)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums text-emerald-300 whitespace-nowrap">
+                      {totInvoiced > 0 ? formatCurrencyCompact(totInvoiced) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums text-amber-300 whitespace-nowrap">
+                      {totPending > 0 ? formatCurrencyCompact(totPending) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5" colSpan={4} />
+                  </tr>
+                </tfoot>
+              );
+            })()}
           </table>
         </div>
 

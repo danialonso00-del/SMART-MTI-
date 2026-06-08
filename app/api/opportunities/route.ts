@@ -21,9 +21,13 @@ export async function GET(req: NextRequest) {
   const country      = searchParams.get('country');
   const search       = searchParams.get('search');
   const lite         = searchParams.get('lite') === 'true';
+  // services=true devuelve solo entradas INT/EXT; por defecto se excluyen
+  const services     = searchParams.get('services') === 'true';
 
   try {
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      serviceType: services ? { not: null } : null,
+    };
 
     if (statusCode) where.statusCode = parseInt(statusCode);
     if (company)    where.company = company;
