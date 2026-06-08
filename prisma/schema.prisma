@@ -1,0 +1,316 @@
+// MTI Business Control Platform - Prisma Schema v2
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// OPORTUNIDADES Y PROYECTOS
+// ============================================================
+model Opportunity {
+  id                  String    @id
+  client              String
+  date                DateTime
+  opportunity         String
+  description         String?   @db.Text
+  amount              Float     @default(0)
+  currency            String    @default("EUR")
+  statusCode          Int
+  company             String
+  probability         Float     @default(0)
+  weightedPipeline    Float     @default(0)
+  owner               String
+  country             String    @default("Spain")
+  expectedClosingDate DateTime?
+
+  blHardware          Float     @default(0)
+  blIa                Float     @default(0)
+  blBim               Float     @default(0)
+  blTtioOm            Float     @default(0)
+  blEvents            Float     @default(0)
+  blProservices       Float     @default(0)
+
+  acceptanceDate      DateTime?
+  week                Int?
+  nextYears           Float     @default(0)
+  costs               Float     @default(0)
+  materialCost        Float     @default(0)
+  peopleCost          Float     @default(0)
+  margin              Float     @default(0)
+  totalInvoiced       Float     @default(0)
+  pendingToInvoice    Float     @default(0)
+  wipStatus           Float     @default(0)
+
+  observations        String?   @db.Text
+  endDate             DateTime?
+  totalPercentage     Float     @default(0)
+  isInternal          Boolean   @default(false)
+  driveFolderId       String?
+
+  accountingEntries   AccountingEntry[]
+  billingConfig       BillingConfig?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([statusCode])
+  @@index([company])
+  @@index([owner])
+  @@index([country])
+  @@index([client])
+  @@map("opportunities")
+}
+
+// ============================================================
+// CLIENTES
+// ============================================================
+model Client {
+  id              String    @id @default(cuid())
+  name            String    @unique
+  country         String    @default("Spain")
+  primaryOwner    String    @default("")
+  lastActivity    DateTime?
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  @@map("clients")
+}
+
+// ============================================================
+// EMPLEADOS (datos reales del Employees.csv)
+// ============================================================
+model Employee {
+  id              String    @id                      // EMP25-0001, etc.
+  name            String    @unique
+  factorialName   String?                            // Nombre en Factorial
+  company         String    @default("MTI")
+  department      String    @default("General")
+  isActive        Boolean   @default(true)
+  observations    String?
+  email           String?
+  hourlyCost      Float     @default(0)
+  monthlySalary   Float     @default(0)
+  availability    Float     @default(100)
+  factorialId     String?
+
+  salaries        Salary[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([company])
+  @@index([department])
+  @@index([isActive])
+  @@map("employees")
+}
+
+// ============================================================
+// SALARIOS MENSUALES (datos reales del Salaries.csv)
+// ============================================================
+model Salary {
+  id                  String    @id @default(cuid())
+  employeeId          String
+  year                Int
+  month               Int
+  date                DateTime
+  salaryForecast      Float     @default(0)
+  salaryReal          Float     @default(0)
+  hoursMonthForecast  Float     @default(146.5)
+  percent             Float     @default(100)
+  hoursMonthReal      Float?
+  hoursPercent        Float?
+  costHour            Float     @default(0)
+
+  employee            Employee  @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, year, month])
+  @@index([employeeId])
+  @@index([year, month])
+  @@map("salaries")
+}
+
+// ============================================================
+// HISTORIAL DE IMPORTACIONES
+// ============================================================
+model ImportHistory {
+  id              String    @id @default(cuid())
+  fileName        String
+  uploadedBy      String
+  recordsTotal    Int       @default(0)
+  recordsOk       Int       @default(0)
+  recordsError    Int       @default(0)
+  recordsWarning  Int       @default(0)
+  status          String    @default("pending")
+  errorLog        String?   @db.Text
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  @@map("import_history")
+}
+
+// ============================================================
+// CONFIGURACIÓN
+// ============================================================
+model AppConfig {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  value       String    @db.Text
+  description String?
+  updatedAt   DateTime  @updatedAt
+  @@map("app_config")
+}
+
+// ============================================================
+// INTEGRACIÓN FACTORIAL
+// ============================================================
+model FactorialProjectMapping {
+  id                   String   @id @default(cuid())
+  internalProjectId    String   @unique
+  factorialProjectId   Int?
+  factorialProjectCode String?
+  factorialProjectName String?
+  matchStatus          String   @default("unmatched") // matched | unmatched | needs_review | manual
+  notes                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  timeEntries   ProjectTimeEntry[]
+  costSummaries ProjectCostSummary[]
+
+  @@index([matchStatus])
+  @@map("factorial_project_mappings")
+}
+
+model ProjectTimeEntry {
+  id                    String   @id @default(cuid())
+  internalProjectId     String
+  internalEmployeeId    String?
+  factorialTimeRecordId String   @unique
+  factorialProjectId    Int?
+  factorialEmployeeId   Int?
+  date                  DateTime
+  imputedMinutes        Int      @default(0)
+  imputedHours          Float    @default(0)
+  hourlyCost            Float    @default(0)
+  calculatedCost        Float    @default(0)
+  source                String   @default("factorial")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  mapping FactorialProjectMapping @relation(fields: [internalProjectId], references: [internalProjectId])
+
+  @@index([internalProjectId])
+  @@index([internalEmployeeId])
+  @@index([date])
+  @@map("project_time_entries")
+}
+
+model ProjectCostSummary {
+  id                String   @id @default(cuid())
+  internalProjectId String
+  startDate         DateTime
+  endDate           DateTime
+  totalMinutes      Int      @default(0)
+  totalHours        Float    @default(0)
+  totalPeopleCost   Float    @default(0)
+  employeesCount    Int      @default(0)
+  lastSyncedAt      DateTime @default(now())
+
+  mapping FactorialProjectMapping @relation(fields: [internalProjectId], references: [internalProjectId])
+
+  @@unique([internalProjectId, startDate, endDate])
+  @@index([internalProjectId])
+  @@map("project_cost_summaries")
+}
+
+// ============================================================
+// CONFIGURACIÓN DE FACTURACIÓN POR PROYECTO
+// ============================================================
+model BillingConfig {
+  id                String             @id @default(cuid())
+  internalProjectId String             @unique
+  billingType       String             @default("fixed") // "fixed" | "monthly" | "milestones"
+  monthlyAmount     Float?
+  billingStartDate  DateTime?
+  billingEndDate    DateTime?
+  notes             String?            @db.Text
+
+  opportunity       Opportunity        @relation(fields: [internalProjectId], references: [id])
+  milestones        BillingMilestone[]
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  @@map("billing_configs")
+}
+
+model BillingMilestone {
+  id              String        @id @default(cuid())
+  billingConfigId String
+  name            String
+  amount          Float         @default(0)
+  dueDate         DateTime?
+  invoicedAt      DateTime?
+  invoiceRef      String?
+
+  billingConfig   BillingConfig @relation(fields: [billingConfigId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([billingConfigId])
+  @@map("billing_milestones")
+}
+
+// ============================================================
+// CONTABILIDAD SAGE 50
+// ============================================================
+model AccountingEntry {
+  id                   String    @id @default(cuid())
+  accountCode          String    // "60000035"
+  accountName          String    // "COMPRAS MATERIAL"
+  entryDate            DateTime?
+  asiento              Int?
+  concept              String    @default("")
+  rawAnalyticCode      String    // raw "Nivel analítico 2" value
+  resolvedProjectCode  String?   // "25-227", "26-400" (resolved, may not exist in DB)
+  internalProjectId    String?   // set only if project exists in opportunities
+  debit                Float     @default(0)
+  credit               Float     @default(0)
+  balance              Float     @default(0)
+  isGeneralExpense     Boolean   @default(false)
+  generalExpenseEntity String?   // "MTI", "ING"
+  entryType            String    // "expense" | "income"
+
+  opportunity          Opportunity? @relation(fields: [internalProjectId], references: [id])
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([internalProjectId])
+  @@index([entryDate])
+  @@index([accountCode])
+  @@index([entryType])
+  @@map("accounting_entries")
+}
+
+// ============================================================
+// LOG DE ACTIVIDAD
+// ============================================================
+model ActivityLog {
+  id          String    @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  oldValue    String?   @db.Text
+  newValue    String?   @db.Text
+  performedBy String
+  createdAt   DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activity_log")
+}
