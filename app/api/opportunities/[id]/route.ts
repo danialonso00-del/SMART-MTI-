@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { badRequest, cleanText, optionalDate, readJsonObject } from '@/lib/api-security';
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -30,7 +31,7 @@ type UpdatePayload = Record<string, unknown>;
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const body = await req.json();
+    const body = await readJsonObject(req);
 
     // Fetch current record — needed for deriving weighted/pending when partial updates come in
     const current = await prisma.opportunity.findUnique({ where: { id: params.id } });
@@ -61,12 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const dateFields = ['date', 'expectedClosingDate', 'acceptanceDate', 'endDate'] as const;
     for (const f of dateFields) {
       if (f in data) {
-        const val = data[f];
-        if (val === null || val === '' || val === undefined) {
-          data[f] = null;
-        } else {
-          data[f] = new Date(val as string);
-        }
+        data[f] = optionalDate(data, f);
       }
     }
 
@@ -91,7 +87,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         action:      'updated',
         oldValue:    JSON.stringify(current),
         newValue:    JSON.stringify(updated),
-        performedBy: body.updatedBy || 'Sistema',
+        performedBy: cleanText(body.updatedBy, 120) || 'Sistema',
       },
     }).catch(err => console.error('activityLog error:', err));
 
@@ -99,6 +95,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } catch (error) {
     console.error('PATCH opportunity error:', error);
     const message = error instanceof Error ? error.message : 'Error desconocido';
+    if (/JSON|numérico|fecha/.test(message)) return badRequest(message);
     return NextResponse.json({ error: `Error al actualizar: ${message}` }, { status: 500 });
   }
 }

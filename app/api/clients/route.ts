@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { badRequest, optionalDate, optionalText, readJsonObject, requiredText } from '@/lib/api-security';
 
 export async function GET() {
   try {
@@ -33,11 +34,22 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const client = await prisma.client.create({ data: body });
+    const body = await readJsonObject(req);
+    const client = await prisma.client.create({
+      data: {
+        name:         requiredText(body, 'name', 255),
+        country:      optionalText(body, 'country', 120) || 'Spain',
+        primaryOwner: optionalText(body, 'primaryOwner', 120) || '',
+        lastActivity: optionalDate(body, 'lastActivity'),
+        notes:        optionalText(body, 'notes', 5000),
+      },
+    });
     return NextResponse.json(client, { status: 201 });
   } catch (error) {
     console.error(error);
+    if (error instanceof Error && /obligatorio|fecha|JSON/.test(error.message)) {
+      return badRequest(error.message);
+    }
     return NextResponse.json({ error: 'Error al crear cliente' }, { status: 500 });
   }
 }

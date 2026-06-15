@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { AUTH_COOKIE_NAME, verifySessionToken } from '@/lib/auth'
 
-export function middleware(request: NextRequest) {
-  const isAuth = request.cookies.get('mti_auth')?.value === 'authenticated'
+export async function middleware(request: NextRequest) {
+  const isAuth = await verifySessionToken(request.cookies.get(AUTH_COOKIE_NAME)?.value)
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === '/login'
   const isAuthApi   = pathname.startsWith('/api/auth')

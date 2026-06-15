@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import {
+  badRequest,
+  cleanText,
+  limitedSearchParam,
+  optionalBoolean,
+  optionalDate,
+  optionalNumber,
+  optionalText,
+  readJsonObject,
+  requiredText,
+} from '@/lib/api-security';
 
 // Fields needed for list/table/kanban views (not the detail page)
 const LIST_SELECT = {
@@ -15,11 +26,11 @@ const LIST_SELECT = {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
 
-  const statusCode   = searchParams.get('status');
-  const company      = searchParams.get('company');
-  const owner        = searchParams.get('owner');
-  const country      = searchParams.get('country');
-  const search       = searchParams.get('search');
+  const statusCode   = limitedSearchParam(searchParams.get('status'), 10);
+  const company      = limitedSearchParam(searchParams.get('company'));
+  const owner        = limitedSearchParam(searchParams.get('owner'));
+  const country      = limitedSearchParam(searchParams.get('country'));
+  const search       = limitedSearchParam(searchParams.get('search'));
   const lite         = searchParams.get('lite') === 'true';
   // services=true devuelve solo entradas INT/EXT; por defecto se excluyen
   const services     = searchParams.get('services') === 'true';
@@ -29,7 +40,10 @@ export async function GET(req: NextRequest) {
       serviceType: services ? { not: null } : null,
     };
 
-    if (statusCode) where.statusCode = parseInt(statusCode);
+    if (statusCode) {
+      const parsedStatus = Number(statusCode);
+      if (Number.isInteger(parsedStatus)) where.statusCode = parsedStatus;
+    }
     if (company)    where.company = company;
     if (owner)      where.owner = owner;
     if (country)    where.country = country;
@@ -104,21 +118,52 @@ async function nextSequentialId(): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await readJsonObject(req);
+
+    const amount = optionalNumber(body, 'amount', 0) ?? 0;
+    const probability = optionalNumber(body, 'probability', 0) ?? 0;
+    const totalInvoiced = optionalNumber(body, 'totalInvoiced', 0) ?? 0;
 
     // Use provided ID if non-empty, otherwise assign next sequential ID
-    const id = body.id?.trim() || await nextSequentialId();
+    const id = cleanText(body.id, 80) || await nextSequentialId();
 
     const opportunity = await prisma.opportunity.create({
       data: {
-        ...body,
         id,
-        date:               new Date(body.date),
-        expectedClosingDate: body.expectedClosingDate ? new Date(body.expectedClosingDate) : null,
-        acceptanceDate:      body.acceptanceDate      ? new Date(body.acceptanceDate)      : null,
-        endDate:             body.endDate             ? new Date(body.endDate)             : null,
-        weightedPipeline:   (body.amount || 0) * ((body.probability || 0) / 100),
-        pendingToInvoice:   (body.amount || 0) - (body.totalInvoiced || 0),
+        client:              requiredText(body, 'client', 255),
+        date:                optionalDate(body, 'date') ?? new Date(),
+        opportunity:         requiredText(body, 'opportunity', 255),
+        description:         optionalText(body, 'description', 5000),
+        amount,
+        currency:            cleanText(body.currency, 10) || 'EUR',
+        statusCode:          optionalNumber(body, 'statusCode', 0) ?? 0,
+        company:             requiredText(body, 'company', 80),
+        probability,
+        weightedPipeline:    amount * (probability / 100),
+        owner:               requiredText(body, 'owner', 120),
+        country:             cleanText(body.country, 120) || 'Spain',
+        expectedClosingDate: optionalDate(body, 'expectedClosingDate'),
+        blHardware:          optionalNumber(body, 'blHardware', 0) ?? 0,
+        blIa:                optionalNumber(body, 'blIa', 0) ?? 0,
+        blBim:               optionalNumber(body, 'blBim', 0) ?? 0,
+        blTtioOm:            optionalNumber(body, 'blTtioOm', 0) ?? 0,
+        blEvents:            optionalNumber(body, 'blEvents', 0) ?? 0,
+        blProservices:       optionalNumber(body, 'blProservices', 0) ?? 0,
+        acceptanceDate:      optionalDate(body, 'acceptanceDate'),
+        week:                optionalNumber(body, 'week'),
+        nextYears:           optionalNumber(body, 'nextYears', 0) ?? 0,
+        costs:               optionalNumber(body, 'costs', 0) ?? 0,
+        materialCost:        optionalNumber(body, 'materialCost', 0) ?? 0,
+        peopleCost:          optionalNumber(body, 'peopleCost', 0) ?? 0,
+        margin:              optionalNumber(body, 'margin', 0) ?? 0,
+        totalInvoiced,
+        pendingToInvoice:    amount - totalInvoiced,
+        wipStatus:           optionalNumber(body, 'wipStatus', 0) ?? 0,
+        observations:        optionalText(body, 'observations', 5000),
+        endDate:             optionalDate(body, 'endDate'),
+        totalPercentage:     optionalNumber(body, 'totalPercentage', 0) ?? 0,
+        isInternal:          optionalBoolean(body, 'isInternal') ?? false,
+        serviceType:         optionalText(body, 'serviceType', 40),
       },
     });
 
@@ -129,14 +174,16 @@ export async function POST(req: NextRequest) {
         entityId:    opportunity.id,
         action:      'created',
         newValue:    JSON.stringify(opportunity),
-        performedBy: body.createdBy || 'Sistema',
+        performedBy: cleanText(body.createdBy, 120) || 'Sistema',
       },
     });
 
     return NextResponse.json(opportunity, { status: 201 });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
     console.error('Error creating opportunity:', error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    if (error instanceof Error && /obligatorio|numérico|fecha|JSON/.test(error.message)) {
+      return badRequest(error.message);
+    }
+    return NextResponse.json({ error: 'Error al crear oportunidad' }, { status: 500 });
   }
 }

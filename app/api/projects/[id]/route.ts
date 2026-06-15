@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { STATUS_PROB } from '@/lib/utils';
+import { badRequest, cleanText, optionalDate, readJsonObject } from '@/lib/api-security';
+
+const UPDATABLE_FIELDS = [
+  'opportunity', 'client', 'description', 'statusCode', 'company', 'owner',
+  'country', 'date', 'expectedClosingDate', 'currency', 'amount', 'probability',
+  'costs', 'totalInvoiced', 'blHardware', 'blIa', 'blBim', 'blTtioOm',
+  'blEvents', 'blProservices', 'observations', 'acceptanceDate', 'endDate',
+  'materialCost', 'peopleCost', 'margin', 'isInternal', 'wipStatus',
+  'totalPercentage', 'week', 'nextYears', 'serviceType',
+] as const;
+
+type UpdatePayload = Record<string, unknown>;
 
 export async function GET(
   req: NextRequest,
@@ -135,37 +147,55 @@ export async function PATCH(
 ) {
   try {
     const id = decodeURIComponent(params.id);
-    const body = await req.json();
+    const body = await readJsonObject(req);
 
     const existing = await prisma.opportunity.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ error: 'Proyecto no encontrado' }, { status: 404 });
     }
 
-    const updated = await prisma.opportunity.update({
-      where: { id },
-      data: {
-        ...body,
-        date:                body.date                ? new Date(body.date)                : undefined,
-        expectedClosingDate: body.expectedClosingDate ? new Date(body.expectedClosingDate) : undefined,
-        acceptanceDate:      body.acceptanceDate      ? new Date(body.acceptanceDate)      : undefined,
-        endDate:             body.endDate             ? new Date(body.endDate)             : undefined,
-        // Auto-calcula probability cuando cambia statusCode (si no se pasa probability explícita)
-        probability: body.statusCode !== undefined && body.probability === undefined
-          ? (STATUS_PROB[body.statusCode] ?? existing.probability)
-          : body.probability ?? undefined,
-        weightedPipeline: (() => {
-          const amt  = body.amount      ?? existing.amount;
-          const prob = body.probability ?? (body.statusCode !== undefined ? (STATUS_PROB[body.statusCode] ?? existing.probability) : existing.probability);
-          return body.amount !== undefined || body.probability !== undefined || body.statusCode !== undefined
-            ? amt * prob / 100
-            : undefined;
-        })(),
-        pendingToInvoice:    body.amount !== undefined || body.totalInvoiced !== undefined
-          ? Math.max(0, (body.amount ?? existing.amount) - (body.totalInvoiced ?? existing.totalInvoiced))
-          : undefined,
-      },
-    });
+    const data: UpdatePayload = {};
+    for (const field of UPDATABLE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        data[field] = body[field];
+      }
+    }
+
+    const numericFields = [
+      'amount', 'probability', 'costs', 'totalInvoiced',
+      'blHardware', 'blIa', 'blBim', 'blTtioOm', 'blEvents', 'blProservices',
+      'materialCost', 'peopleCost', 'margin', 'wipStatus', 'totalPercentage',
+      'week', 'nextYears', 'statusCode',
+    ] as const;
+    for (const f of numericFields) {
+      if (f in data) {
+        const value = Number(data[f]);
+        if (!Number.isFinite(value)) throw new Error(`${f} debe ser numérico`);
+        data[f] = value;
+      }
+    }
+
+    const dateFields = ['date', 'expectedClosingDate', 'acceptanceDate', 'endDate'] as const;
+    for (const f of dateFields) {
+      if (f in data) data[f] = optionalDate(data, f);
+    }
+
+    if ('statusCode' in data && !('probability' in data)) {
+      data.probability = STATUS_PROB[data.statusCode as number] ?? existing.probability;
+    }
+
+    const amount = 'amount' in data ? data.amount as number : existing.amount;
+    const probability = 'probability' in data ? data.probability as number : existing.probability;
+    const totalInvoiced = 'totalInvoiced' in data ? data.totalInvoiced as number : existing.totalInvoiced;
+
+    if ('amount' in data || 'probability' in data || 'statusCode' in data) {
+      data.weightedPipeline = amount * probability / 100;
+    }
+    if ('amount' in data || 'totalInvoiced' in data) {
+      data.pendingToInvoice = Math.max(0, amount - totalInvoiced);
+    }
+
+    const updated = await prisma.opportunity.update({ where: { id }, data });
 
     await prisma.activityLog.create({
       data: {
@@ -174,13 +204,16 @@ export async function PATCH(
         action:      'updated',
         oldValue:    JSON.stringify(existing),
         newValue:    JSON.stringify(updated),
-        performedBy: body.updatedBy || 'Sistema',
+        performedBy: cleanText(body.updatedBy, 120) || 'Sistema',
       },
     });
 
     return NextResponse.json(updated);
   } catch (error) {
     console.error('Error updating project:', error);
+    if (error instanceof Error && /JSON|numérico|fecha/.test(error.message)) {
+      return badRequest(error.message);
+    }
     return NextResponse.json({ error: 'Error al actualizar proyecto' }, { status: 500 });
   }
 }

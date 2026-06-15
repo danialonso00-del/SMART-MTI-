@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import {
+  badRequest,
+  limitedSearchParam,
+  optionalBoolean,
+  optionalNumber,
+  optionalText,
+  readJsonObject,
+  requiredText,
+} from '@/lib/api-security';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const company    = searchParams.get('company');
-  const department = searchParams.get('department');
+  const company    = limitedSearchParam(searchParams.get('company'));
+  const department = limitedSearchParam(searchParams.get('department'));
   const activeOnly = searchParams.get('isActive');
-  const search     = searchParams.get('search');
+  const search     = limitedSearchParam(searchParams.get('search'));
 
   try {
     const where: Record<string, unknown> = {};
@@ -82,11 +91,29 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const employee = await prisma.employee.create({ data: body });
+    const body = await readJsonObject(req);
+    const employee = await prisma.employee.create({
+      data: {
+        id:            requiredText(body, 'id', 80),
+        name:          requiredText(body, 'name', 255),
+        factorialName: optionalText(body, 'factorialName', 255),
+        company:       optionalText(body, 'company', 80) || 'MTI',
+        department:    optionalText(body, 'department', 120) || 'General',
+        isActive:      optionalBoolean(body, 'isActive') ?? true,
+        observations:  optionalText(body, 'observations', 5000),
+        email:         optionalText(body, 'email', 320),
+        hourlyCost:    optionalNumber(body, 'hourlyCost', 0) ?? 0,
+        monthlySalary: optionalNumber(body, 'monthlySalary', 0) ?? 0,
+        availability:  optionalNumber(body, 'availability', 100) ?? 100,
+        factorialId:   optionalText(body, 'factorialId', 80),
+      },
+    });
     return NextResponse.json(employee, { status: 201 });
   } catch (error) {
     console.error(error);
+    if (error instanceof Error && /obligatorio|numérico|JSON/.test(error.message)) {
+      return badRequest(error.message);
+    }
     return NextResponse.json({ error: 'Error al crear empleado' }, { status: 500 });
   }
 }

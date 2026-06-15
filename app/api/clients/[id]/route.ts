@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { badRequest, optionalDate, optionalText, readJsonObject } from '@/lib/api-security';
 
 export async function GET(
   req: NextRequest,
@@ -73,7 +74,7 @@ export async function PATCH(
 ) {
   try {
     const clientName = decodeURIComponent(params.id);
-    const body = await req.json();
+    const body = await readJsonObject(req);
 
     let client = await prisma.client.findFirst({ where: { name: clientName } });
     if (!client) {
@@ -83,13 +84,24 @@ export async function PATCH(
       return NextResponse.json({ error: 'Cliente no encontrado' }, { status: 404 });
     }
 
+    const data = {
+      ...(optionalText(body, 'name', 255) !== undefined ? { name: optionalText(body, 'name', 255) } : {}),
+      ...(optionalText(body, 'country', 120) !== undefined ? { country: optionalText(body, 'country', 120) } : {}),
+      ...(optionalText(body, 'primaryOwner', 120) !== undefined ? { primaryOwner: optionalText(body, 'primaryOwner', 120) } : {}),
+      ...(body.lastActivity !== undefined ? { lastActivity: optionalDate(body, 'lastActivity') } : {}),
+      ...(optionalText(body, 'notes', 5000) !== undefined ? { notes: optionalText(body, 'notes', 5000) } : {}),
+    };
+
     const updated = await prisma.client.update({
       where: { id: client.id },
-      data: body,
+      data,
     });
     return NextResponse.json(updated);
   } catch (error) {
     console.error(error);
+    if (error instanceof Error && /fecha|JSON/.test(error.message)) {
+      return badRequest(error.message);
+    }
     return NextResponse.json({ error: 'Error al actualizar cliente' }, { status: 500 });
   }
 }
