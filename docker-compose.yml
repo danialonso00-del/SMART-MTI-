@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET:-change-this-secret-before-production}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-password}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mti_app}:${POSTGRES_PASSWORD:-mti_app_password}@db:5432/${POSTGRES_DB:-mti_business_control}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:-mti_app}:${POSTGRES_PASSWORD:-mti_app_password}@db:5432/${POSTGRES_DB:-mti_business_control}?schema=public
+      PRISMA_SCHEMA_SYNC: ${PRISMA_SCHEMA_SYNC:-migrate}
+      FACTORIAL_API_KEY: ${FACTORIAL_API_KEY:-}
+      FACTORIAL_COMPANY_ID: ${FACTORIAL_COMPANY_ID:-}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mti_business_control}
+      POSTGRES_USER: ${POSTGRES_USER:-mti_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mti_app_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mti_app} -d ${POSTGRES_DB:-mti_business_control}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
