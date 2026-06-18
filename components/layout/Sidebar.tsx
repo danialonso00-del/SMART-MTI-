@@ -18,6 +18,7 @@ import {
   ChevronRight,
   LogOut,
   Globe,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,8 +29,9 @@ interface SidebarProps {
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Países', href: '/geo', icon: Globe },
-  { label: 'Pipeline', href: '/pipeline', icon: TrendingUp },
+  { label: 'Reportes',  href: '/reports',   icon: FileText },
+  { label: 'Países',    href: '/geo',        icon: Globe },
+  { label: 'Pipeline',  href: '/pipeline',   icon: TrendingUp },
   { label: 'Oportunidades', href: '/opportunities', icon: Target },
   { label: 'Proyectos', href: '/projects', icon: FolderOpen },
   { label: 'Servicios', href: '/services', icon: Building2 },
@@ -66,6 +68,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         className={cn(
           'fixed top-0 left-0 h-full w-64 bg-slate-900 flex flex-col z-50 transition-transform duration-300',
           'lg:translate-x-0 lg:static lg:z-auto',
+          'print:hidden',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -94,7 +97,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             Principal
           </p>
 
-          {navItems.slice(0, 8).map((item) => {
+          {navItems.slice(0, 9).map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
@@ -128,7 +131,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider px-3 mb-3">
               Sistema
             </p>
-            {navItems.slice(8).map((item) => {
+            {navItems.slice(9).map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
               return (

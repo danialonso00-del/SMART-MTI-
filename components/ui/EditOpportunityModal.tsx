@@ -267,8 +267,9 @@ export default function EditOpportunityModal({ opportunity, onClose, onSaved }: 
           {/* Dates */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label text="Fecha" />
+              <Label text="Fecha de Apertura" />
               <input type="date" value={form.date} onChange={e => set('date', e.target.value)} className={inputCls} />
+              <p className="text-xs text-slate-400 mt-1">Cuándo se originó la oportunidad — puede ser retroactiva</p>
             </div>
             <div>
               <Label text="Fecha Cierre Esperada" />

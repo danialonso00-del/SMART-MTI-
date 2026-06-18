@@ -11,7 +11,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const [searchValue, setSearchValue] = useState('');
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 gap-4 shrink-0 z-30 sticky top-0">
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 gap-4 shrink-0 z-30 sticky top-0 print:hidden">
       {/* Menu button (mobile) */}
       <button
         onClick={onMenuClick}

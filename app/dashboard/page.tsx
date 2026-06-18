@@ -10,6 +10,7 @@ import {
   Activity, Archive, Target, XCircle, ArrowRight,
   Cpu, Sparkles, Building2, Wrench, CalendarDays, UserCheck,
   Trophy, ChevronDown, Clock, Users, Globe, AlertCircle,
+  PlusCircle, Percent, Timer,
 } from 'lucide-react';
 import KpiCard from '@/components/ui/KpiCard';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -355,6 +356,40 @@ export default function DashboardPage() {
     return resolved.length > 0 ? (won.length / resolved.length) * 100 : 0;
   }, [filteredOpps]);
 
+  // Actividad del período — usa opp.date (fecha de apertura), no effectiveDate
+  // para reflejar cuántas oportunidades se ABRIERON en el período filtrado
+  const nuevasEnPeriodo = useMemo(() => {
+    let base = allOpps;
+    if (activeBL !== 'all')      base = base.filter(o => getOppBLValue(o, activeBL) > 0);
+    if (activeCompany !== 'all') base = base.filter(o => o.company === activeCompany);
+    if (year !== 'all')          base = base.filter(o => new Date(o.date).getFullYear() === year);
+    if (quarter !== 'all')       base = base.filter(o => Math.floor(new Date(o.date).getMonth() / 3) + 1 === quarter);
+    if (month !== 'all')         base = base.filter(o => new Date(o.date).getMonth() + 1 === (month as number));
+    return base;
+  }, [allOpps, activeBL, activeCompany, year, quarter, month]);
+
+  // Tasa de conversión: de las oportunidades abiertas en el período,
+  // qué porcentaje han llegado a Won/Delivering/Finished
+  const tasaConversion = useMemo(() => {
+    if (nuevasEnPeriodo.length === 0) return null;
+    const ganadas = nuevasEnPeriodo.filter(o => [6, 7, 8].includes(o.statusCode));
+    return (ganadas.length / nuevasEnPeriodo.length) * 100;
+  }, [nuevasEnPeriodo]);
+
+  // Velocidad de pipeline: días promedio desde apertura (date) hasta aceptación
+  // Solo para oportunidades ganadas con ambas fechas definidas
+  const velocidadPipeline = useMemo(() => {
+    const wonWithDates = filteredOpps.filter(
+      o => [6, 7, 8].includes(o.statusCode) && o.date && o.acceptanceDate
+    );
+    if (wonWithDates.length === 0) return null;
+    const totalDays = wonWithDates.reduce((sum, o) => {
+      const days = (new Date(o.acceptanceDate!).getTime() - new Date(o.date).getTime()) / 86400000;
+      return sum + Math.max(0, days);
+    }, 0);
+    return totalDays / wonWithDates.length;
+  }, [filteredOpps]);
+
   // Quarterly trend — always shows all 4 quarters for the selected/current year
   const quarterlyTrend = useMemo(() => {
     const targetYear = year !== 'all' ? year : (availableYears[0] ?? new Date().getFullYear());
@@ -640,6 +675,50 @@ export default function DashboardPage() {
           <KpiCard label="Finalizados"            value={String(totals.finished)}          subtitle="Proyectos completados"  icon={<Archive size={22} />}    color="slate" size="sm" />
           <KpiCard label="Oportunidades Abiertas" value={String(totals.openOpportunities)} subtitle="Status 2, 3, 4, 5"     icon={<DollarSign size={22} />} color="amber" size="sm" />
           <KpiCard label="Perdidas"               value={String(totals.lost)}              subtitle="Oportunidades perdidas" icon={<XCircle size={22} />}    color="rose"  size="sm" />
+        </div>
+      )}
+
+      {/* ── KPI Row 3: Actividad del Período ── */}
+      {!loading && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3 px-0.5">
+            Actividad del período
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <KpiCard
+              label="Nuevas Oportunidades"
+              value={String(nuevasEnPeriodo.length)}
+              tooltip={nuevasEnPeriodo.length > 0
+                ? formatCurrency(nuevasEnPeriodo.reduce((s, o) => s + o.amount, 0))
+                : undefined}
+              subtitle={nuevasEnPeriodo.length > 0
+                ? `${formatCurrencyCompact(nuevasEnPeriodo.reduce((s, o) => s + o.amount, 0))} valor total`
+                : 'Sin oportunidades en el período'}
+              icon={<PlusCircle size={22} />}
+              color="amber"
+              size="sm"
+            />
+            <KpiCard
+              label="Tasa de Conversión"
+              value={tasaConversion !== null ? `${tasaConversion.toFixed(1)}%` : '—'}
+              subtitle={tasaConversion !== null
+                ? `${nuevasEnPeriodo.filter(o => [6, 7, 8].includes(o.statusCode)).length} ganadas de ${nuevasEnPeriodo.length} abiertas`
+                : 'Sin oportunidades en el período'}
+              icon={<Percent size={22} />}
+              color="emerald"
+              size="sm"
+            />
+            <KpiCard
+              label="Velocidad de Pipeline"
+              value={velocidadPipeline !== null ? `${Math.round(velocidadPipeline)} días` : '—'}
+              subtitle={velocidadPipeline !== null
+                ? `Promedio apertura → aceptación · ${filteredOpps.filter(o => [6,7,8].includes(o.statusCode) && o.acceptanceDate).length} proyectos`
+                : 'Sin proyectos ganados con fechas'}
+              icon={<Timer size={22} />}
+              color="blue"
+              size="sm"
+            />
+          </div>
         </div>
       )}
 

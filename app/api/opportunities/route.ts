@@ -56,13 +56,31 @@ export async function GET(req: NextRequest) {
   }
 }
 
+async function nextSequentialId(): Promise<string> {
+  const yy = new Date().getFullYear().toString().slice(-2);
+  const prefix = `${yy}-`;
+  const existing = await prisma.opportunity.findMany({
+    where: { id: { startsWith: prefix } },
+    select: { id: true },
+  });
+  const nums = existing
+    .map(o => parseInt(o.id.slice(prefix.length)))
+    .filter(n => !isNaN(n));
+  const max = nums.length > 0 ? Math.max(...nums) : 99;
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Use provided ID if non-empty, otherwise assign next sequential ID
+    const id = body.id?.trim() || await nextSequentialId();
+
     const opportunity = await prisma.opportunity.create({
       data: {
         ...body,
+        id,
         date:               new Date(body.date),
         expectedClosingDate: body.expectedClosingDate ? new Date(body.expectedClosingDate) : null,
         acceptanceDate:      body.acceptanceDate      ? new Date(body.acceptanceDate)      : null,
@@ -85,7 +103,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(opportunity, { status: 201 });
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('Error creating opportunity:', error);
-    return NextResponse.json({ error: 'Error al crear oportunidad' }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

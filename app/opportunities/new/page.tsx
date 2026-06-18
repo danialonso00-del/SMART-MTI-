@@ -118,15 +118,10 @@ export default function NewOpportunityPage() {
     setError(null);
     setSubmitting(true);
 
-    const finalId =
-      id.trim() !== ''
-        ? id.trim()
-        : `${new Date().getFullYear().toString().slice(-2)}-${Math.floor(Math.random() * 900 + 100)}`;
-
     const computedAmount = parseFloat(amount) || 0;
 
     const payload = {
-      id: finalId,
+      id: id.trim(),  // empty → server assigns next sequential ID
       opportunity: name,
       client,
       description,
@@ -288,7 +283,7 @@ export default function NewOpportunityPage() {
               </select>
             </FormField>
 
-            <FormField label="Fecha" required>
+            <FormField label="Fecha de Apertura" required helper="Cuándo se originó la oportunidad — puede ser retroactiva">
               <input
                 type="date"
                 value={date}
