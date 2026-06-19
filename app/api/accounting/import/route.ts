@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+export const maxDuration = 300; // 5 min — large Sage CSV files need time to parse + batch-insert
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseEuroFloat(s: string): number {
@@ -107,14 +109,18 @@ function parseCSV(text: string): ParsedEntry[] {
     if (asientoStr) curAsiento = parseInt(asientoStr, 10) || null;
     if (conceptStr) curConcept = conceptStr;
 
-    // Analytic code is always in col[10]
-    const rawAnalytic = (c[10] ?? '').trim();
+    // Sage CSV layout (15 cols, 0-indexed):
+    // 0:Cuenta  1:Definición  2:Fecha  3:Asiento  4:Concepto  5:Totalplan
+    // 6:Plan analítico  7:Nivel NA1  8:Debe NA1  9:Haber NA1  10:Saldo NA1
+    // 11:Nivel analítico 2 (project code)  12:Debe NA2  13:Haber NA2  14:Saldo NA2
+    if (c.length < 12) continue;
+
+    const rawAnalytic = (c[11] ?? '').trim();
     if (!rawAnalytic) continue;
 
-    // Skip MTI/ING rows that are just general overhead — we still record them
-    const debit  = parseEuroFloat(c[7] ?? '');
-    const credit = parseEuroFloat(c[8] ?? '');
-    const balance = parseEuroFloat(c[9] ?? '');
+    const debit   = parseEuroFloat(c[12] ?? '');
+    const credit  = parseEuroFloat(c[13] ?? '');
+    const balance = parseEuroFloat(c[14] ?? '');
 
     // Skip zero-amount entries (informational splits)
     if (debit === 0 && credit === 0 && balance === 0) continue;
@@ -158,9 +164,9 @@ export async function POST(request: NextRequest) {
       const file = form.get('file') as File | null;
       if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
       const buf = await file.arrayBuffer();
-      // Try UTF-8 then latin1
+      // fatal:true makes TextDecoder throw on invalid UTF-8 bytes (e.g. Sage's Windows-1252 exports)
       try {
-        csvText = new TextDecoder('utf-8').decode(buf);
+        csvText = new TextDecoder('utf-8', { fatal: true }).decode(buf);
       } catch {
         csvText = new TextDecoder('latin1').decode(buf);
       }
@@ -251,20 +257,23 @@ export async function POST(request: NextRequest) {
         select: { id: true, amount: true },
       });
 
-      await Promise.all(oppsToSync.map(opp => {
-        const sageIncome  = incomeMap.get(opp.id) ?? 0;
-        const sageExpense = expenseMap.get(opp.id) ?? 0;
-        const pending     = Math.max(0, opp.amount - sageIncome);
-        return prisma.opportunity.update({
-          where: { id: opp.id },
-          data: {
-            totalInvoiced:   sageIncome,
-            pendingToInvoice: pending,
-            // Only update costs if Sage has expense data (don't zero out Factorial people costs)
-            ...(sageExpense > 0 ? { costs: sageExpense } : {}),
-          },
-        });
-      }));
+      // Batch into groups of 50 to avoid saturating the connection pool
+      const SYNC_BATCH = 50;
+      for (let i = 0; i < oppsToSync.length; i += SYNC_BATCH) {
+        await Promise.all(oppsToSync.slice(i, i + SYNC_BATCH).map(opp => {
+          const sageIncome  = incomeMap.get(opp.id) ?? 0;
+          const sageExpense = expenseMap.get(opp.id) ?? 0;
+          const pending     = Math.max(0, opp.amount - sageIncome);
+          return prisma.opportunity.update({
+            where: { id: opp.id },
+            data: {
+              totalInvoiced:    sageIncome,
+              pendingToInvoice: pending,
+              ...(sageExpense > 0 ? { costs: sageExpense } : {}),
+            },
+          });
+        }));
+      }
     }
 
     return NextResponse.json({
