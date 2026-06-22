@@ -55,6 +55,8 @@ model Opportunity {
 
   accountingEntries   AccountingEntry[]
   billingConfig       BillingConfig?
+  budgetLines         BudgetLine[]
+  revenuePhasing      RevenuePhasing[]
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -298,6 +300,49 @@ model AccountingEntry {
   @@index([accountCode])
   @@index([entryType])
   @@map("accounting_entries")
+}
+
+// ============================================================
+// CONSTRUCTOR DE PRESUPUESTO
+// ============================================================
+model BudgetLine {
+  id            String      @id @default(cuid())
+  opportunityId String
+  businessLine  String      @default("general")  // hardware | ia | bim | ttioOm | events | proservices | general
+  description   String
+  quantity      Float       @default(1)
+  unitCost      Float       @default(0)
+  marginPct     Float       @default(0)         // gross margin % (sale price basis)
+  sortOrder     Int         @default(0)
+  notes         String?
+
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([opportunityId])
+  @@map("budget_lines")
+}
+
+// ============================================================
+// PLANIFICACIÓN DE INGRESOS POR AÑO
+// ============================================================
+model RevenuePhasing {
+  id            String      @id @default(cuid())
+  opportunityId String
+  year          Int
+  amount        Float       @default(0)
+  notes         String?
+
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([opportunityId, year])
+  @@index([opportunityId])
+  @@map("revenue_phasing")
 }
 
 // ============================================================

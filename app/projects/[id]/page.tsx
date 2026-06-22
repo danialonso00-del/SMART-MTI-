@@ -6,6 +6,7 @@ import {
   ArrowLeft, AlertCircle, Calendar, Users, DollarSign, X,
   TrendingUp, TrendingDown, FileText, Clock, BarChart2, Building2, CheckCircle,
   RefreshCw, Zap, TriangleAlert, Info, Receipt, FolderOpen, ExternalLink, Loader2, Trash2,
+  Plus, Pencil,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,6 +15,7 @@ import {
 import StatusSelect from '@/components/ui/StatusSelect';
 import CompanyBadge from '@/components/ui/CompanyBadge';
 import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
+import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
 import { StatusCode } from '@/lib/types';
 import {
   formatCurrency, formatCurrencyCompact, formatDate, formatPercent,
@@ -37,6 +39,24 @@ const DEPT_COLORS = [
   '#F59E0B','#3B82F6','#8B5CF6','#10B981','#F97316',
   '#14B8A6','#EF4444','#6366F1','#EC4899','#84CC16',
 ];
+
+// Business line definitions (matches opp blXxx fields)
+const BL_DEFS = [
+  { value: 'hardware',    label: 'Hardware',        oppField: 'blHardware',    hex: '#F59E0B' },
+  { value: 'ia',          label: 'IA',              oppField: 'blIa',          hex: '#3B82F6' },
+  { value: 'bim',         label: 'BIM',             oppField: 'blBim',         hex: '#8B5CF6' },
+  { value: 'ttioOm',      label: 'TTIO / O&M',      oppField: 'blTtioOm',      hex: '#10B981' },
+  { value: 'events',      label: 'Eventos',         oppField: 'blEvents',      hex: '#F97316' },
+  { value: 'proservices', label: 'Pro Services',    oppField: 'blProservices', hex: '#14B8A6' },
+  { value: 'general',     label: 'General / Otros', oppField: null,            hex: '#94A3B8' },
+] as const;
+type BLValue = typeof BL_DEFS[number]['value'];
+const BL_MAP = Object.fromEntries(BL_DEFS.map(b => [b.value, b])) as Record<BLValue, typeof BL_DEFS[number]>;
+
+function budgetSalePrice(cost: number, marginPct: number) {
+  if (marginPct >= 100 || marginPct <= 0) return cost;
+  return cost / (1 - marginPct / 100);
+}
 
 type CostCategory = 'material' | 'servicios' | 'personal' | 'amortizacion' | 'otros' | 'noclasificado';
 
@@ -90,6 +110,9 @@ interface ProjectData {
   sageTotalIncome: number;
   sageTotalExpense: number;
   hasSageData: boolean;
+  budgetCostTotal: number;
+  budgetSaleTotal: number;
+  budgetLineCount: number;
   companySummary: { totalEmployees: number; totalMonthlySalary: number; avgCostHour: number };
 }
 
@@ -133,8 +156,8 @@ interface FactorialSummaryData {
   alerts: FactorialAlert[];
 }
 
-function KpiCard({ label, value, sub, color = 'slate', icon }: {
-  label: string; value: string; sub?: string; color?: string; icon?: React.ReactNode;
+function KpiCard({ label, value, sub, color = 'slate', icon, tooltip }: {
+  label: string; value: string; sub?: string; color?: string; icon?: React.ReactNode; tooltip?: string;
 }) {
   const colorMap: Record<string, string> = {
     slate: 'bg-white border-slate-200', amber: 'bg-amber-50 border-amber-200',
@@ -155,7 +178,7 @@ function KpiCard({ label, value, sub, color = 'slate', icon }: {
         {icon && <span className={labelMap[color] || labelMap.slate}>{icon}</span>}
         <p className={cn('text-xs font-medium', labelMap[color] || labelMap.slate)}>{label}</p>
       </div>
-      <p className={cn('text-xl font-bold', textMap[color] || textMap.slate)}>{value}</p>
+      <p className={cn('text-xl font-bold', textMap[color] || textMap.slate)} title={tooltip}>{value}</p>
       {sub && <p className="text-xs mt-0.5 opacity-60">{sub}</p>}
     </div>
   );
@@ -170,7 +193,7 @@ export default function ProjectDetailPage() {
   const [statusCode, setStatusCode] = useState<StatusCode | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'resumen' | 'finanzas' | 'contabilidad' | 'recursos' | 'factorial' | 'calendario' | 'historial'>('resumen');
+  const [tab, setTab] = useState<'resumen' | 'finanzas' | 'presupuesto' | 'contabilidad' | 'recursos' | 'factorial' | 'calendario' | 'historial'>('resumen');
 
   const [factorialData, setFactorialData]       = useState<FactorialSummaryData | null>(null);
   const [factorialLoading, setFactorialLoading] = useState(false);
@@ -191,6 +214,33 @@ export default function ProjectDetailPage() {
   const [savingCosts, setSavingCosts]           = useState(false);
   const [saveCostsMsg, setSaveCostsMsg]         = useState('');
   const [showDelete, setShowDelete]             = useState(false);
+  const [showEditOpp, setShowEditOpp]           = useState(false);
+
+  // ── Budget lines ──
+  interface BudgetLineItem {
+    id: string; businessLine: string; description: string;
+    quantity: number; unitCost: number; marginPct: number; sortOrder: number; notes: string | null;
+  }
+  const [budgetLines, setBudgetLines]       = useState<BudgetLineItem[]>([]);
+  const [budgetLoading, setBudgetLoading]   = useState(false);
+  const [budgetLoaded, setBudgetLoaded]     = useState(false);
+  const [editingLineId, setEditingLineId]   = useState<string | null>(null);
+  const [editLineForm, setEditLineForm]     = useState<Partial<BudgetLineItem>>({});
+  // addingToBL: which BL section the add-form belongs to, null = form hidden
+  const [addingToBL, setAddingToBL]         = useState<string | null>(null);
+  const [newLineForm, setNewLineForm]       = useState<{ businessLine: string; description: string; quantity: number; unitCost: number; marginPct: number }>(
+    { businessLine: 'general', description: '', quantity: 1, unitCost: 0, marginPct: 0 }
+  );
+  const [savingLine, setSavingLine]         = useState(false);
+  const [budgetMsg, setBudgetMsg]           = useState('');
+  const [syncingBudget, setSyncingBudget]   = useState(false);
+
+  // ── Revenue phasing ──
+  interface PhasingRow { year: number; amount: number; notes: string }
+  const [revPhasing, setRevPhasing]               = useState<PhasingRow[]>([]);
+  const [revPhasingLoading, setRevPhasingLoading] = useState(false);
+  const [revPhasingSaving, setRevPhasingSaving]   = useState(false);
+  const [revPhasingMsg, setRevPhasingMsg]         = useState('');
 
   interface AccountingEntry {
     id: string; accountCode: string; accountName: string;
@@ -283,6 +333,25 @@ export default function ProjectDetailPage() {
   const [newMilestoneAmt, setNewMilestoneAmt]     = useState<number | ''>('');
   const [newMilestoneDue, setNewMilestoneDue]     = useState('');
 
+  const loadBudgetLines = useCallback(() => {
+    setBudgetLoading(true);
+    fetch(`/api/projects/${encodeURIComponent(id)}/budget`)
+      .then(r => r.json())
+      .then(d => { setBudgetLines(d); setBudgetLoading(false); })
+      .catch(() => setBudgetLoading(false));
+  }, [id]);
+
+  const loadRevPhasing = useCallback(() => {
+    setRevPhasingLoading(true);
+    fetch(`/api/projects/${encodeURIComponent(id)}/revenue-phasing`)
+      .then(r => r.json())
+      .then((d: { year: number; amount: number; notes: string | null }[]) => {
+        setRevPhasing(d.map(r => ({ year: r.year, amount: r.amount, notes: r.notes ?? '' })));
+        setRevPhasingLoading(false);
+      })
+      .catch(() => setRevPhasingLoading(false));
+  }, [id]);
+
   const loadBillingConfig = useCallback(() => {
     setBillingLoading(true);
     fetch(`/api/projects/${encodeURIComponent(id)}/billing-config`)
@@ -300,6 +369,14 @@ export default function ProjectDetailPage() {
       })
       .catch(() => setBillingLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (tab === 'presupuesto' && !budgetLoaded && !budgetLoading) {
+      setBudgetLoaded(true);
+      loadBudgetLines();
+      loadRevPhasing();
+    }
+  }, [tab, budgetLoaded, budgetLoading, loadBudgetLines, loadRevPhasing]);
 
   useEffect(() => {
     if (tab === 'finanzas' && !billingConfig && !billingLoading) {
@@ -378,6 +455,104 @@ export default function ProjectDetailPage() {
     } finally {
       setSavingCosts(false);
     }
+  }
+
+  async function handleAddBudgetLine() {
+    if (!newLineForm.description.trim()) return;
+    setSavingLine(true); setBudgetMsg('');
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(id)}/budget`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newLineForm),
+      });
+      if (!res.ok) throw new Error();
+      setNewLineForm({ businessLine: addingToBL ?? 'general', description: '', quantity: 1, unitCost: 0, marginPct: 0 });
+      setAddingToBL(null);
+      loadBudgetLines();
+    } catch { setBudgetMsg('Error al añadir'); }
+    finally { setSavingLine(false); }
+  }
+
+  async function handleUpdateBudgetLine(lineId: string) {
+    setSavingLine(true); setBudgetMsg('');
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(id)}/budget/${lineId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editLineForm),
+      });
+      if (!res.ok) throw new Error();
+      setEditingLineId(null);
+      loadBudgetLines();
+    } catch { setBudgetMsg('Error al actualizar'); }
+    finally { setSavingLine(false); }
+  }
+
+  async function handleDeleteBudgetLine(lineId: string) {
+    await fetch(`/api/projects/${encodeURIComponent(id)}/budget/${lineId}`, { method: 'DELETE' });
+    loadBudgetLines();
+  }
+
+  async function handleSyncBudgetToContract() {
+    if (!data || budgetLines.length === 0) return;
+    setSyncingBudget(true); setBudgetMsg('');
+    try {
+      // Compute per-BL PVP totals from current budget lines
+      const blPvpMap: Record<string, number> = {};
+      let generalPvp = 0;
+      for (const line of budgetLines) {
+        const pvp = budgetSalePrice(line.quantity * line.unitCost, line.marginPct);
+        if (line.businessLine === 'general') generalPvp += pvp;
+        else blPvpMap[line.businessLine] = (blPvpMap[line.businessLine] ?? 0) + pvp;
+      }
+      // Distribute general lines proportionally into BL fields
+      const specificTotal = Object.values(blPvpMap).reduce((s, v) => s + v, 0);
+      if (generalPvp > 0 && specificTotal > 0) {
+        for (const bl of Object.keys(blPvpMap)) {
+          blPvpMap[bl] += generalPvp * (blPvpMap[bl] / specificTotal);
+        }
+      } else if (generalPvp > 0) {
+        // No BL-specific lines — attribute everything to first active BL or leave as amount only
+        blPvpMap['general_total'] = generalPvp;
+      }
+      const BL_FIELD: Record<string, string> = {
+        hardware: 'blHardware', ia: 'blIa', bim: 'blBim',
+        ttioOm: 'blTtioOm', events: 'blEvents', proservices: 'blProservices',
+      };
+      const blPayload: Record<string, number> = {};
+      for (const [bl, pvp] of Object.entries(blPvpMap)) {
+        const field = BL_FIELD[bl];
+        if (field) blPayload[field] = Math.round(pvp * 100) / 100;
+      }
+      // Zero out BLs not in budget
+      for (const field of Object.values(BL_FIELD)) {
+        if (!(field in blPayload)) blPayload[field] = 0;
+      }
+      const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...blPayload, amount: budgetTotalSale }),
+      });
+      if (!res.ok) throw new Error();
+      const updated = await res.json();
+      setData(prev => prev ? { ...prev, opportunity: updated, budgetSaleTotal: budgetTotalSale, budgetCostTotal: budgetTotalCost } : prev);
+      setBudgetMsg('Contrato sincronizado con el presupuesto');
+    } catch { setBudgetMsg('Error al sincronizar'); }
+    finally { setSyncingBudget(false); }
+  }
+
+  async function handleSaveRevPhasing() {
+    setRevPhasingSaving(true); setRevPhasingMsg('');
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(id)}/revenue-phasing`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phasing: revPhasing }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error();
+      setRevPhasing((d as { year: number; amount: number; notes: string | null }[]).map(r => ({ year: r.year, amount: r.amount, notes: r.notes ?? '' })));
+      setRevPhasingMsg('Guardado');
+    } catch { setRevPhasingMsg('Error al guardar'); }
+    finally { setRevPhasingSaving(false); }
   }
 
   async function handleSync() {
@@ -500,6 +675,7 @@ export default function ProjectDetailPage() {
   }
 
   const { opportunity: opp, employees, activityLogs, companySummary } = data;
+  const { budgetCostTotal: apiBudgetCost, budgetSaleTotal: apiBudgetSale, budgetLineCount: apiBudgetLines } = data;
 
   // Business lines
   const blEntries = Object.entries(BL_LABELS)
@@ -546,6 +722,7 @@ export default function ProjectDetailPage() {
   const TABS = [
     { key: 'resumen',       label: 'Resumen' },
     { key: 'finanzas',      label: 'Finanzas' },
+    { key: 'presupuesto',   label: 'Presupuesto' },
     { key: 'contabilidad',  label: 'Contabilidad' },
     { key: 'recursos',      label: `Recursos (${employees.length})` },
     { key: 'factorial',     label: 'Costes Reales' },
@@ -554,6 +731,31 @@ export default function ProjectDetailPage() {
   ] as const;
 
   const invoicedPct = opp.amount > 0 ? Math.round((effectiveInvoiced / opp.amount) * 100) : 0;
+
+  // Budget computed totals
+  const budgetTotalCost = budgetLines.reduce((s, l) => s + l.quantity * l.unitCost, 0);
+  const budgetTotalSale = budgetLines.reduce((s, l) => s + budgetSalePrice(l.quantity * l.unitCost, l.marginPct), 0);
+  const budgetDiff      = budgetTotalSale - opp.amount;
+  const budgetAvgMargin = budgetTotalCost > 0 && budgetTotalSale > 0
+    ? ((budgetTotalSale - budgetTotalCost) / budgetTotalSale) * 100
+    : 0;
+
+  // BL sections: show BLs that have a target in the opportunity, plus always "general"
+  const activeBLSections = BL_DEFS.map(bl => ({
+    ...bl,
+    target: bl.oppField ? (opp[bl.oppField as keyof Opportunity] as number ?? 0) : 0,
+  })).filter(bl => bl.oppField === null || bl.target > 0);
+
+  // Group budget lines by businessLine
+  const linesByBL = budgetLines.reduce<Record<string, BudgetLineItem[]>>((acc, line) => {
+    const k = line.businessLine || 'general';
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(line);
+    return acc;
+  }, {});
+
+  // Revenue phasing total
+  const phasingTotal = revPhasing.reduce((s, r) => s + r.amount, 0);
 
   return (
     <div className="space-y-4 pb-10">
@@ -610,6 +812,18 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {showEditOpp && (
+        <EditOpportunityModal
+          opportunity={opp as unknown as EditableOpportunity}
+          onClose={() => setShowEditOpp(false)}
+          onSaved={updated => {
+            setData(prev => prev ? { ...prev, opportunity: { ...prev.opportunity, ...updated } as typeof prev.opportunity } : prev);
+            setStatusCode(updated.statusCode as StatusCode);
+            setShowEditOpp(false);
+          }}
+        />
+      )}
+
       {showDelete && (
         <DeleteConfirmModal
           id={opp.id}
@@ -662,6 +876,12 @@ export default function ProjectDetailPage() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap mt-3 sm:mt-0">
+            <button
+              onClick={() => setShowEditOpp(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-amber-50 border border-slate-200 hover:border-amber-300 rounded-xl transition-colors"
+            >
+              <Pencil size={13} /> Editar
+            </button>
             <button
               onClick={() => setShowDelete(true)}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors"
@@ -723,12 +943,12 @@ export default function ProjectDetailPage() {
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <KpiCard label="Importe Total"   value={formatCurrencyCompact(opp.amount)}         color="slate"   icon={<DollarSign size={13} />} />
-        <KpiCard label="Facturado"       value={formatCurrencyCompact(effectiveInvoiced)}  color="emerald" sub={`${invoicedPct}% del total${hasSageData ? ' · Sage' : ''}`} icon={<TrendingUp size={13} />} />
-        <KpiCard label="Pendiente"       value={formatCurrencyCompact(effectivePending)} color="amber" icon={<Clock size={13} />} />
+        <KpiCard label="Importe Total"   value={formatCurrencyCompact(opp.amount)}         tooltip={formatCurrency(opp.amount)}         color="slate"   icon={<DollarSign size={13} />} />
+        <KpiCard label="Facturado"       value={formatCurrencyCompact(effectiveInvoiced)}  tooltip={formatCurrency(effectiveInvoiced)}  color="emerald" sub={`${invoicedPct}% del total${hasSageData ? ' · Sage' : ''}`} icon={<TrendingUp size={13} />} />
+        <KpiCard label="Pendiente"       value={formatCurrencyCompact(effectivePending)}   tooltip={formatCurrency(effectivePending)}   color="amber" icon={<Clock size={13} />} />
         <KpiCard label="Progreso WIP"    value={`${opp.wipStatus}%`}                       color="teal"   icon={<BarChart2 size={13} />} />
         <KpiCard label="Margen"          value={totalCosts === 0 ? '—' : `${marginPct.toFixed(1)}%`} color="violet" icon={<TrendingUp size={13} />} />
-        <KpiCard label="Coste Total"     value={formatCurrencyCompact(totalCosts)}         color="slate"   icon={<DollarSign size={13} />} />
+        <KpiCard label="Coste Total"     value={formatCurrencyCompact(totalCosts)}         tooltip={formatCurrency(totalCosts)}         color="slate"   icon={<DollarSign size={13} />} />
       </div>
 
       {/* WIP progress bar */}
@@ -763,6 +983,118 @@ export default function ProjectDetailPage() {
 
       {/* RESUMEN TAB */}
       {tab === 'resumen' && (
+        <div className="space-y-6">
+
+        {/* ── Margin analysis banner ── */}
+        {(() => {
+          // Use budget aggregates from API (or live from loaded lines if presupuesto tab was visited)
+          const bCost = budgetLines.length > 0 ? budgetTotalCost : apiBudgetCost;
+          const bSale = budgetLines.length > 0 ? budgetTotalSale : apiBudgetSale;
+          const bLines = budgetLines.length > 0 ? budgetLines.length : apiBudgetLines;
+          const budgetMargin = bSale > 0 ? ((bSale - bCost) / bSale) * 100 : null;
+          const realMargin   = totalCosts > 0 && opp.amount > 0 ? marginPct : null;
+          const delta        = budgetMargin !== null && realMargin !== null ? realMargin - budgetMargin : null;
+          const budgetCoversContract = bSale > 0 && Math.abs(bSale - opp.amount) / opp.amount < 0.02;
+
+          if (bLines === 0) {
+            return (
+              <div className="bg-slate-50 border border-slate-200 border-dashed rounded-2xl px-5 py-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-slate-600">Análisis de Margen</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Sin presupuesto construido aún. Ve a la pestaña Presupuesto para desglosar costes y márgenes.</p>
+                </div>
+                <button onClick={() => setTab('presupuesto')}
+                  className="shrink-0 px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-xl transition-colors">
+                  Ir a Presupuesto →
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Análisis de Margen: Esperado vs Real</h3>
+                {!budgetCoversContract && (
+                  <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">
+                    ⚠ Presupuesto ({formatCurrency(bSale)}) ≠ Contrato ({formatCurrency(opp.amount)})
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100">
+                {/* Expected margin */}
+                <div className="px-5 py-4">
+                  <p className="text-xs text-slate-500 mb-1">Margen Esperado (Presupuesto)</p>
+                  <p className={cn('text-2xl font-bold', budgetMargin === null ? 'text-slate-400' : budgetMargin >= 30 ? 'text-emerald-600' : budgetMargin >= 15 ? 'text-amber-600' : 'text-red-600')}>
+                    {budgetMargin !== null ? `${budgetMargin.toFixed(1)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">Sobre PVP: {formatCurrency(bSale)}</p>
+                </div>
+                {/* Real margin */}
+                <div className="px-5 py-4">
+                  <p className="text-xs text-slate-500 mb-1">Margen Real (Costes reales)</p>
+                  <p className={cn('text-2xl font-bold', realMargin === null ? 'text-slate-400' : realMargin >= 30 ? 'text-emerald-600' : realMargin >= 15 ? 'text-amber-600' : 'text-red-600')}>
+                    {realMargin !== null ? `${realMargin.toFixed(1)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">{hasSageData ? 'Fuente: Sage' : 'Fuente: manual'}</p>
+                </div>
+                {/* Delta */}
+                <div className="px-5 py-4">
+                  <p className="text-xs text-slate-500 mb-1">Desviación</p>
+                  {delta !== null ? (
+                    <>
+                      <p className={cn('text-2xl font-bold', delta >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                        {delta >= 0 ? '+' : ''}{delta.toFixed(1)}pp
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">{delta >= 0 ? 'Mejor que lo planificado' : 'Peor que lo planificado'}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-2xl font-bold text-slate-300">—</p>
+                      <p className="text-xs text-slate-400 mt-1">Sin datos de costes reales</p>
+                    </>
+                  )}
+                </div>
+                {/* Budget cost vs sale */}
+                <div className="px-5 py-4">
+                  <p className="text-xs text-slate-500 mb-1">Coste Presupuestado</p>
+                  <p className="text-2xl font-bold text-slate-800" title={formatCurrency(bCost)}>{formatCurrencyCompact(bCost)}</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    de {bLines} {bLines === 1 ? 'partida' : 'partidas'}
+                    {' · '}<span className="text-slate-500 font-medium" title={formatCurrency(bSale)}>PVP {formatCurrencyCompact(bSale)}</span>
+                  </p>
+                </div>
+              </div>
+              {/* Visual margin comparison bar */}
+              {budgetMargin !== null && (
+                <div className="px-5 py-3 border-t border-slate-100 space-y-2">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-slate-500">Margen esperado</span>
+                      <span className="text-xs font-semibold text-slate-700">{budgetMargin.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-blue-400 transition-all" style={{ width: `${Math.min(budgetMargin, 60)}%` }} />
+                    </div>
+                  </div>
+                  {realMargin !== null && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate-500">Margen real</span>
+                        <span className="text-xs font-semibold text-slate-700">{realMargin.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', realMargin >= budgetMargin ? 'bg-emerald-500' : 'bg-red-400')}
+                          style={{ width: `${Math.min(Math.max(realMargin, 0), 60)}%` }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="space-y-4">
             {opp.description && (
@@ -826,6 +1158,7 @@ export default function ProjectDetailPage() {
               ))}
             </div>
           </div>
+        </div>
         </div>
       )}
 
@@ -1808,6 +2141,438 @@ export default function ProjectDetailPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* PRESUPUESTO TAB */}
+      {tab === 'presupuesto' && (
+        <div className="space-y-4">
+
+          {/* ── Header summary ── */}
+          {budgetLines.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs text-slate-500 mb-1">Contrato firmado</p>
+                <p className="text-lg font-bold text-slate-900">{formatCurrency(opp.amount)}</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs text-slate-500 mb-1">Coste presupuestado</p>
+                <p className="text-lg font-bold text-slate-900">{formatCurrency(budgetTotalCost)}</p>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs text-emerald-600 mb-1">PVP presupuestado</p>
+                <p className="text-lg font-bold text-emerald-900">{formatCurrency(budgetTotalSale)}</p>
+              </div>
+              <div className={cn('border rounded-2xl p-4 shadow-sm', Math.abs(budgetDiff) < 1 ? 'bg-emerald-50 border-emerald-200' : budgetDiff > 0 ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200')}>
+                <p className={cn('text-xs mb-1', Math.abs(budgetDiff) < 1 ? 'text-emerald-600' : budgetDiff > 0 ? 'text-blue-600' : 'text-red-500')}>
+                  Margen medio · {budgetDiff >= 0 ? '▲' : '▼'} vs contrato
+                </p>
+                <p className={cn('text-lg font-bold', Math.abs(budgetDiff) < 1 ? 'text-emerald-900' : budgetDiff > 0 ? 'text-blue-900' : 'text-red-900')}>
+                  {budgetTotalSale > 0 ? `${budgetAvgMargin.toFixed(1)}%` : '—'}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {opp.amount > 0 && `${budgetDiff >= 0 ? '+' : ''}${((budgetDiff / opp.amount) * 100).toFixed(1)}% (${formatCurrency(Math.abs(budgetDiff))})`}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Budget Builder by Business Line ── */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Constructor de Presupuesto</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Desglosa los costes y márgenes por línea de negocio del proyecto</p>
+              </div>
+              {budgetLoading && <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />}
+            </div>
+
+            {!budgetLoading && (
+              <div className="divide-y divide-slate-100">
+                {activeBLSections.map(bl => {
+                  const lines   = linesByBL[bl.value] ?? [];
+                  const blCost  = lines.reduce((s, l) => s + l.quantity * l.unitCost, 0);
+                  const blSale  = lines.reduce((s, l) => s + budgetSalePrice(l.quantity * l.unitCost, l.marginPct), 0);
+                  const isAddingHere = addingToBL === bl.value;
+                  const diffOk  = bl.target > 0 && Math.abs(blSale - bl.target) / bl.target < 0.02;
+                  const diffOver = bl.target > 0 && blSale > bl.target * 1.02;
+
+                  return (
+                    <div key={bl.value}>
+                      {/* BL section header */}
+                      <div className="flex items-center justify-between px-5 py-3 bg-slate-50/60"
+                           style={{ borderLeft: `3px solid ${bl.hex}` }}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-bold text-slate-800" style={{ color: bl.hex }}>{bl.label}</span>
+                          {bl.target > 0 && (
+                            <span className="text-xs text-slate-500">
+                              Objetivo contrato: <strong className="text-slate-700">{formatCurrency(bl.target)}</strong>
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {lines.length > 0 && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-slate-500">Coste: {formatCurrency(blCost)}</span>
+                              <span className="text-slate-300">·</span>
+                              <span className={cn('font-semibold',
+                                diffOk ? 'text-emerald-600' : diffOver ? 'text-blue-600' : bl.target > 0 ? 'text-amber-600' : 'text-slate-700'
+                              )}>
+                                PVP: {formatCurrency(blSale)}
+                                {bl.target > 0 && ` (${blSale >= bl.target ? '+' : ''}${(((blSale - bl.target) / bl.target) * 100).toFixed(1)}%)`}
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              setAddingToBL(bl.value);
+                              setNewLineForm({ businessLine: bl.value, description: '', quantity: 1, unitCost: 0, marginPct: 0 });
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 hover:border-amber-300 hover:text-amber-700 rounded-xl transition-colors"
+                          >
+                            <Plus size={12} /> Añadir
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Lines table */}
+                      {(lines.length > 0 || isAddingHere) && (
+                        <table className="w-full text-xs">
+                          {lines.length === 0 && !isAddingHere ? null : (
+                            <thead>
+                              <tr className="border-b border-slate-100">
+                                {['Descripción', 'Uds.', 'Coste Unit.', 'Total Coste', 'Margen %', 'Precio Venta', ''].map(h => (
+                                  <th key={h} className="text-left font-semibold text-slate-400 px-4 py-2 whitespace-nowrap first:pl-8">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                          )}
+                          <tbody className="divide-y divide-slate-50">
+                            {lines.map(line => {
+                              const isEditing = editingLineId === line.id;
+                              const lCost = isEditing ? (editLineForm.quantity ?? 0) * (editLineForm.unitCost ?? 0) : line.quantity * line.unitCost;
+                              const lSale = isEditing ? budgetSalePrice(lCost, editLineForm.marginPct ?? 0) : budgetSalePrice(line.quantity * line.unitCost, line.marginPct);
+
+                              return isEditing ? (
+                                <tr key={line.id} className="bg-amber-50">
+                                  <td className="px-4 py-2 pl-8">
+                                    <input type="text" value={editLineForm.description ?? ''} autoFocus
+                                      onChange={e => setEditLineForm(p => ({ ...p, description: e.target.value }))}
+                                      className="w-56 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    <input type="number" min={0} step={1} value={editLineForm.quantity ?? 1}
+                                      onChange={e => setEditLineForm(p => ({ ...p, quantity: parseFloat(e.target.value) || 0 }))}
+                                      className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    <input type="number" min={0} step={0.01} value={editLineForm.unitCost ?? 0}
+                                      onChange={e => setEditLineForm(p => ({ ...p, unitCost: parseFloat(e.target.value) || 0 }))}
+                                      className="w-28 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                  </td>
+                                  <td className="px-4 py-2 font-semibold text-slate-800 whitespace-nowrap">{formatCurrency(lCost)}</td>
+                                  <td className="px-4 py-2">
+                                    <div className="flex items-center gap-1">
+                                      <input type="number" min={0} max={99} step={1} value={editLineForm.marginPct ?? 0}
+                                        onChange={e => setEditLineForm(p => ({ ...p, marginPct: parseFloat(e.target.value) || 0 }))}
+                                        className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                      <span className="text-slate-400">%</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2 font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(lSale)}</td>
+                                  <td className="px-4 py-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <button onClick={() => handleUpdateBudgetLine(line.id)} disabled={savingLine}
+                                        className="px-2 py-1 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg disabled:opacity-50">
+                                        {savingLine ? '...' : 'Guardar'}
+                                      </button>
+                                      <button onClick={() => setEditingLineId(null)}
+                                        className="px-2 py-1 text-xs text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg">
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : (
+                                <tr key={line.id} className="hover:bg-slate-50 group">
+                                  <td className="px-4 py-2.5 pl-8 font-medium text-slate-800">{line.description}</td>
+                                  <td className="px-4 py-2.5 text-slate-600">{line.quantity}</td>
+                                  <td className="px-4 py-2.5 text-slate-700 whitespace-nowrap">{formatCurrency(line.unitCost)}</td>
+                                  <td className="px-4 py-2.5 text-slate-800 font-semibold whitespace-nowrap">{formatCurrency(lCost)}</td>
+                                  <td className="px-4 py-2.5 text-slate-600">{line.marginPct > 0 ? `${line.marginPct}%` : '—'}</td>
+                                  <td className="px-4 py-2.5 font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(lSale)}</td>
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => { setEditingLineId(line.id); setEditLineForm({ ...line }); }}
+                                        className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
+                                        <Pencil size={12} />
+                                      </button>
+                                      <button onClick={() => handleDeleteBudgetLine(line.id)}
+                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+
+                            {/* Inline add form for this BL */}
+                            {isAddingHere && (
+                              <tr className="bg-blue-50/60 border-t border-blue-100">
+                                <td className="px-4 py-2 pl-8">
+                                  <input type="text" value={newLineForm.description} autoFocus
+                                    placeholder="Descripción de la partida..."
+                                    onChange={e => setNewLineForm(p => ({ ...p, description: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleAddBudgetLine()}
+                                    className="w-56 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                </td>
+                                <td className="px-4 py-2">
+                                  <input type="number" min={0} step={1} value={newLineForm.quantity}
+                                    onChange={e => setNewLineForm(p => ({ ...p, quantity: parseFloat(e.target.value) || 0 }))}
+                                    className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                </td>
+                                <td className="px-4 py-2">
+                                  <input type="number" min={0} step={0.01} value={newLineForm.unitCost || ''}
+                                    placeholder="0.00"
+                                    onChange={e => setNewLineForm(p => ({ ...p, unitCost: parseFloat(e.target.value) || 0 }))}
+                                    className="w-28 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                </td>
+                                <td className="px-4 py-2 text-slate-700 font-semibold whitespace-nowrap">
+                                  {formatCurrency(newLineForm.quantity * newLineForm.unitCost)}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center gap-1">
+                                    <input type="number" min={0} max={99} step={1} value={newLineForm.marginPct || ''}
+                                      placeholder="0"
+                                      onChange={e => setNewLineForm(p => ({ ...p, marginPct: parseFloat(e.target.value) || 0 }))}
+                                      className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                                    <span className="text-slate-400">%</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2 text-emerald-700 font-semibold whitespace-nowrap">
+                                  {formatCurrency(budgetSalePrice(newLineForm.quantity * newLineForm.unitCost, newLineForm.marginPct))}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={handleAddBudgetLine} disabled={savingLine || !newLineForm.description.trim()}
+                                      className="px-2 py-1 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg disabled:opacity-50">
+                                      {savingLine ? '...' : 'Añadir'}
+                                    </button>
+                                    <button onClick={() => setAddingToBL(null)}
+                                      className="px-2 py-1 text-xs text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg">
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+
+                            {/* BL subtotal row */}
+                            {lines.length > 1 && (
+                              <tr className="border-t border-slate-100 bg-slate-50/40">
+                                <td className="px-4 py-1.5 pl-8 text-xs text-slate-500 italic">Subtotal {bl.label}</td>
+                                <td />
+                                <td />
+                                <td className="px-4 py-1.5 text-xs font-semibold text-slate-700 whitespace-nowrap">{formatCurrency(blCost)}</td>
+                                <td />
+                                <td className="px-4 py-1.5 text-xs font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(blSale)}</td>
+                                <td />
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      )}
+
+                      {/* Empty state for this BL */}
+                      {lines.length === 0 && !isAddingHere && (
+                        <p className="pl-8 py-2 text-xs text-slate-400 italic">Sin partidas. Haz clic en &quot;Añadir&quot; para desglosar este importe.</p>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Grand total footer */}
+                {budgetLines.length > 0 && (
+                  <div className="px-5 py-3 bg-slate-50 border-t-2 border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">Total presupuesto</span>
+                      <div className="flex items-center gap-6 text-xs">
+                        <span className="text-slate-600">Coste: <strong className="text-slate-900">{formatCurrency(budgetTotalCost)}</strong></span>
+                        <span className="text-slate-600">Margen medio: <strong>{budgetAvgMargin.toFixed(1)}%</strong></span>
+                        <span className="text-emerald-600 font-bold">PVP total: {formatCurrency(budgetTotalSale)}</span>
+                      </div>
+                    </div>
+                    {/* Sync banner: appears when budget PVP ≠ contract amount */}
+                    {opp.amount > 0 && Math.abs(budgetDiff) > 1 ? (
+                      <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                        <div className="text-xs">
+                          <span className="font-semibold text-amber-800">El PVP del presupuesto no coincide con el contrato.</span>
+                          <span className="text-amber-700 ml-1">
+                            Presupuesto: {formatCurrency(budgetTotalSale)} · Contrato: {formatCurrency(opp.amount)}
+                            {' '}({budgetDiff > 0 ? '+' : ''}{((budgetDiff / opp.amount) * 100).toFixed(1)}%)
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleSyncBudgetToContract}
+                          disabled={syncingBudget}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors disabled:opacity-60"
+                        >
+                          {syncingBudget ? <><RefreshCw size={11} className="animate-spin" /> Actualizando...</> : <><RefreshCw size={11} /> Actualizar contrato al presupuesto</>}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-emerald-600 font-semibold">✓ Presupuesto cuadra con el contrato ({formatCurrency(opp.amount)})</p>
+                    )}
+                  </div>
+                )}
+
+                {budgetMsg && (
+                  <div className={cn('px-5 py-2 text-xs border-t', budgetMsg.startsWith('Error') ? 'text-red-600 border-red-100' : 'text-emerald-600 border-emerald-100')}>{budgetMsg}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Revenue Phasing ── */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Previsión de Facturación por Año</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  El contrato es de <strong className="text-slate-600">{formatCurrency(opp.amount)}</strong>. Indica cuándo prevés emitir las facturas — esto no cambia el valor del proyecto, es planificación de tesorería.
+                </p>
+              </div>
+              {revPhasingLoading && <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />}
+            </div>
+
+            <div className="p-5 space-y-4">
+              {revPhasing.length === 0 && !revPhasingLoading && (
+                <p className="text-xs text-slate-400 text-center py-4">
+                  Sin planificación aún. Añade los años en que esperas cobrar este contrato.
+                </p>
+              )}
+
+              {revPhasing.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="text-left text-xs font-semibold text-slate-500 pb-2 pr-4">Año</th>
+                        <th className="text-left text-xs font-semibold text-slate-500 pb-2 pr-4">Importe (€)</th>
+                        <th className="text-left text-xs font-semibold text-slate-500 pb-2 pr-4">% del Contrato</th>
+                        <th className="pb-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {revPhasing.map((row, i) => (
+                        <tr key={row.year}>
+                          <td className="py-2 pr-4 font-semibold text-slate-800">{row.year}</td>
+                          <td className="py-2 pr-4">
+                            <input
+                              type="number" min={0} step={1000}
+                              value={row.amount || ''}
+                              placeholder="0"
+                              onChange={e => setRevPhasing(p => p.map((r, j) => j === i ? { ...r, amount: parseFloat(e.target.value) || 0 } : r))}
+                              className="w-36 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 text-slate-900"
+                            />
+                          </td>
+                          <td className="py-2 pr-4">
+                            {opp.amount > 0 ? (
+                              <div className="flex items-center gap-2">
+                                <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-amber-400 rounded-full"
+                                    style={{ width: `${Math.min(100, (row.amount / opp.amount) * 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs text-slate-600 font-medium">
+                                  {((row.amount / opp.amount) * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td className="py-2">
+                            <button
+                              onClick={() => setRevPhasing(p => p.filter((_, j) => j !== i))}
+                              className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Eliminar año"
+                            >
+                              <X size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Totals */}
+                      <tr className="border-t border-slate-200 font-bold bg-slate-50">
+                        <td className="py-2 pr-4 text-xs text-slate-700 uppercase">Total</td>
+                        <td className="py-2 pr-4 text-sm text-slate-900">{formatCurrency(phasingTotal)}</td>
+                        <td className="py-2 pr-4">
+                          {opp.amount > 0 && (
+                            <span className={cn(
+                              'text-xs font-semibold',
+                              Math.abs(phasingTotal - opp.amount) < 1 ? 'text-emerald-600' : 'text-amber-600'
+                            )}>
+                              {((phasingTotal / opp.amount) * 100).toFixed(1)}%
+                            </span>
+                          )}
+                        </td>
+                        <td />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Warning if total doesn't match */}
+              {revPhasing.length > 0 && opp.amount > 0 && Math.abs(phasingTotal - opp.amount) > 1 && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-700">
+                  <TriangleAlert size={13} className="shrink-0" />
+                  Total planificado <strong>{formatCurrency(phasingTotal)}</strong> ≠ contrato <strong>{formatCurrency(opp.amount)}</strong>
+                  {' · '}Diferencia: <strong>{formatCurrency(Math.abs(phasingTotal - opp.amount))}</strong>
+                </div>
+              )}
+
+              {revPhasing.length > 0 && opp.amount > 0 && Math.abs(phasingTotal - opp.amount) <= 1 && (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-xs text-emerald-700">
+                  <CheckCircle size={13} className="shrink-0" />
+                  Planificación completa · 100% del contrato distribuido
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => {
+                    const thisYear = new Date().getFullYear();
+                    const nextYear = revPhasing.length > 0
+                      ? Math.max(...revPhasing.map(r => r.year)) + 1
+                      : thisYear;
+                    if (!revPhasing.find(r => r.year === nextYear)) {
+                      setRevPhasing(p => [...p, { year: nextYear, amount: 0, notes: '' }]);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  <Plus size={13} /> Añadir año
+                </button>
+
+                <div className="ml-auto flex items-center gap-3">
+                  {revPhasingMsg && (
+                    <span className={cn('text-xs', revPhasingMsg === 'Guardado' ? 'text-emerald-600' : 'text-red-500')}>
+                      {revPhasingMsg}
+                    </span>
+                  )}
+                  <button
+                    onClick={handleSaveRevPhasing}
+                    disabled={revPhasingSaving || revPhasing.length === 0}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    {revPhasingSaving ? 'Guardando...' : 'Guardar planificación'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

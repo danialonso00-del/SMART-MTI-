@@ -10,7 +10,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
 import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
 import { StatusCode } from '@/lib/types';
-import { formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
+import { formatCurrency, formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
 
 interface Project {
   id: string;
@@ -37,6 +37,10 @@ interface Project {
   blTtioOm: number;
   blEvents: number;
   blProservices: number;
+  // Budget aggregates from API
+  budgetLineCount: number;
+  budgetCostTotal: number;
+  budgetSaleTotal: number;
 }
 
 const BL_COLORS: Record<string, string> = {
@@ -101,10 +105,34 @@ function BlDots({ project }: { project: Project }) {
 
 function MarginBadge({ project }: { project: Project }) {
   const totalCosts = (project.peopleCost ?? 0) + (project.materialCost ?? 0) + (project.costs ?? 0);
-  if (totalCosts === 0) return <span className="text-slate-300 text-xs">—</span>;
-  const margin = project.amount > 0 ? ((project.amount - totalCosts) / project.amount) * 100 : 0;
-  const color = margin > 30 ? 'text-emerald-600' : margin >= 10 ? 'text-amber-600' : 'text-red-600';
-  return <span className={cn('text-xs font-bold tabular-nums', color)}>{margin.toFixed(1)}%</span>;
+  const realMargin   = (totalCosts > 0 && project.amount > 0) ? ((project.amount - totalCosts) / project.amount) * 100 : null;
+  const budgetMargin = (project.budgetSaleTotal > 0) ? ((project.budgetSaleTotal - project.budgetCostTotal) / project.budgetSaleTotal) * 100 : null;
+
+  if (realMargin === null && budgetMargin === null) return <span className="text-slate-300 text-xs">—</span>;
+
+  const realColor = realMargin === null ? '' : realMargin > 30 ? 'text-emerald-600' : realMargin >= 10 ? 'text-amber-600' : 'text-red-600';
+  const budgetColor = budgetMargin === null ? '' : budgetMargin > 30 ? 'text-emerald-600' : budgetMargin >= 10 ? 'text-amber-600' : 'text-red-600';
+  const delta = (realMargin !== null && budgetMargin !== null) ? realMargin - budgetMargin : null;
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {budgetMargin !== null && (
+        <span className={cn('text-xs tabular-nums', budgetColor)} title="Margen esperado (presupuesto)">
+          {budgetMargin.toFixed(1)}% <span className="text-slate-400 font-normal">esp.</span>
+        </span>
+      )}
+      {realMargin !== null && (
+        <span className={cn('text-xs font-bold tabular-nums', realColor)} title="Margen real (costes)">
+          {realMargin.toFixed(1)}%
+          {delta !== null && (
+            <span className={cn('ml-1 font-normal text-xs', delta >= 0 ? 'text-emerald-500' : 'text-red-500')}>
+              ({delta >= 0 ? '+' : ''}{delta.toFixed(1)}pp)
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function ProjectCard({ project, onClick, onEdit, onDelete }: { project: Project; onClick: () => void; onEdit: () => void; onDelete: () => void }) {
@@ -182,17 +210,52 @@ function ProjectCard({ project, onClick, onEdit, onDelete }: { project: Project;
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="text-center bg-slate-50 rounded-xl py-2 px-1">
           <p className="text-xs text-slate-400 mb-0.5">Importe</p>
-          <p className="text-xs font-bold text-slate-900">{formatCurrencyCompact(project.amount)}</p>
+          <p className="text-xs font-bold text-slate-900" title={formatCurrency(project.amount, project.currency)}>{formatCurrencyCompact(project.amount)}</p>
         </div>
         <div className="text-center bg-emerald-50 rounded-xl py-2 px-1">
           <p className="text-xs text-emerald-500 mb-0.5">Facturado</p>
-          <p className="text-xs font-bold text-emerald-700">{formatCurrencyCompact(project.totalInvoiced)}</p>
+          <p className="text-xs font-bold text-emerald-700" title={formatCurrency(project.totalInvoiced, project.currency)}>{formatCurrencyCompact(project.totalInvoiced)}</p>
         </div>
         <div className="text-center bg-amber-50 rounded-xl py-2 px-1">
           <p className="text-xs text-amber-500 mb-0.5">Pendiente</p>
-          <p className="text-xs font-bold text-amber-700">{formatCurrencyCompact(project.pendingToInvoice)}</p>
+          <p className="text-xs font-bold text-amber-700" title={formatCurrency(project.pendingToInvoice, project.currency)}>{formatCurrencyCompact(project.pendingToInvoice)}</p>
         </div>
       </div>
+
+      {/* Margin analysis row — shows when budget exists */}
+      {project.budgetLineCount > 0 && (() => {
+        const budgetMargin = project.budgetSaleTotal > 0
+          ? ((project.budgetSaleTotal - project.budgetCostTotal) / project.budgetSaleTotal) * 100
+          : null;
+        const totalCostsLocal = (project.peopleCost ?? 0) + (project.materialCost ?? 0) + (project.costs ?? 0);
+        const realMargin = totalCostsLocal > 0 && project.amount > 0
+          ? ((project.amount - totalCostsLocal) / project.amount) * 100
+          : null;
+        const delta = budgetMargin !== null && realMargin !== null ? realMargin - budgetMargin : null;
+        return (
+          <div className="mb-3 bg-slate-50 rounded-xl px-3 py-2 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">Margen esperado</span>
+              <span className={cn('font-semibold', budgetMargin !== null && budgetMargin >= 20 ? 'text-blue-600' : 'text-amber-600')}>
+                {budgetMargin !== null ? `${budgetMargin.toFixed(1)}%` : '—'}
+              </span>
+            </div>
+            {realMargin !== null && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Margen real</span>
+                <span className={cn('font-bold', realMargin >= 30 ? 'text-emerald-600' : realMargin >= 10 ? 'text-amber-600' : 'text-red-600')}>
+                  {realMargin.toFixed(1)}%
+                  {delta !== null && (
+                    <span className={cn('ml-1 font-normal', delta >= 0 ? 'text-emerald-500' : 'text-red-500')}>
+                      ({delta >= 0 ? '+' : ''}{delta.toFixed(1)}pp)
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="flex items-center justify-between pt-3 border-t border-slate-100">
         <div className="flex items-center gap-2">
@@ -417,15 +480,15 @@ export default function ProjectsPage() {
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
           <p className="text-xs text-slate-400">Importe Total</p>
-          <p className="text-lg font-bold text-slate-900">{formatCurrencyCompact(totalAmount)}</p>
+          <p className="text-lg font-bold text-slate-900" title={formatCurrency(totalAmount)}>{formatCurrencyCompact(totalAmount)}</p>
         </div>
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
           <p className="text-xs text-emerald-600">Total Facturado</p>
-          <p className="text-lg font-bold text-emerald-800">{formatCurrencyCompact(totalInvoiced)}</p>
+          <p className="text-lg font-bold text-emerald-800" title={formatCurrency(totalInvoiced)}>{formatCurrencyCompact(totalInvoiced)}</p>
         </div>
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
           <p className="text-xs text-amber-600">Pendiente Facturar</p>
-          <p className="text-lg font-bold text-amber-800">{formatCurrencyCompact(totalPending)}</p>
+          <p className="text-lg font-bold text-amber-800" title={formatCurrency(totalPending)}>{formatCurrencyCompact(totalPending)}</p>
         </div>
       </div>
 
@@ -501,13 +564,13 @@ export default function ProjectsPage() {
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <CompanyBadge company={project.company} size="sm" />
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-bold text-slate-900">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-bold text-slate-900" title={formatCurrency(project.amount, project.currency)}>
                       {formatCurrencyCompact(project.amount)}
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-semibold text-emerald-600">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-semibold text-emerald-600" title={project.totalInvoiced > 0 ? formatCurrency(project.totalInvoiced, project.currency) : undefined}>
                       {project.totalInvoiced > 0 ? formatCurrencyCompact(project.totalInvoiced) : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-semibold text-amber-600">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-right text-xs font-semibold text-amber-600" title={project.pendingToInvoice > 0 ? formatCurrency(project.pendingToInvoice, project.currency) : undefined}>
                       {project.pendingToInvoice > 0 ? formatCurrencyCompact(project.pendingToInvoice) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-right">
@@ -545,7 +608,7 @@ export default function ProjectsPage() {
           </div>
           <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
             <p className="text-xs text-slate-500">{filtered.length} proyectos</p>
-            <span className="text-xs text-slate-400">Total: <span className="font-bold text-slate-800">{formatCurrencyCompact(totalAmount)}</span></span>
+            <span className="text-xs text-slate-400">Total: <span className="font-bold text-slate-800" title={formatCurrency(totalAmount)}>{formatCurrencyCompact(totalAmount)}</span></span>
           </div>
         </div>
       )}

@@ -10,7 +10,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import EditOpportunityModal, { type EditableOpportunity } from '@/components/ui/EditOpportunityModal';
 import DeleteConfirmModal from '@/components/ui/DeleteConfirmModal';
 import { StatusCode } from '@/lib/types';
-import { formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
+import { formatCurrency, formatCurrencyCompact, formatDate, getCountryFlag, cn } from '@/lib/utils';
 
 interface Opportunity {
   id: string;
@@ -61,7 +61,7 @@ const BL_COLORS: Record<string, string> = {
 };
 const BL_KEYS = ['blHardware', 'blIa', 'blBim', 'blTtioOm', 'blEvents', 'blProservices'] as const;
 
-type SortKey = 'client' | 'amount' | 'probability' | 'expectedClosingDate' | 'weightedPipeline';
+type SortKey = 'id' | 'client' | 'amount' | 'probability' | 'expectedClosingDate' | 'weightedPipeline' | 'statusCode' | 'company' | 'owner';
 type SortDir = 'asc' | 'desc';
 
 export default function OpportunitiesPage() {
@@ -294,12 +294,12 @@ export default function OpportunitiesPage() {
         <div className="w-px h-6 bg-amber-200" />
         <div>
           <p className="text-xs text-amber-600">Importe Total</p>
-          <p className="text-sm font-bold text-amber-900">{formatCurrencyCompact(totalAmount)}</p>
+          <p className="text-sm font-bold text-amber-900" title={formatCurrency(totalAmount)}>{formatCurrencyCompact(totalAmount)}</p>
         </div>
         <div className="w-px h-6 bg-amber-200" />
         <div>
           <p className="text-xs text-amber-600">Pipeline Ponderado</p>
-          <p className="text-sm font-bold text-blue-700">{formatCurrencyCompact(totalWeighted)}</p>
+          <p className="text-sm font-bold text-blue-700" title={formatCurrency(totalWeighted)}>{formatCurrencyCompact(totalWeighted)}</p>
         </div>
       </div>
 
@@ -321,7 +321,10 @@ export default function OpportunitiesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">ID</th>
+                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
+                    onClick={() => handleSort('id')}>
+                    <div className="flex items-center gap-1">ID <SortIcon k="id" /></div>
+                  </th>
                   <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
                     onClick={() => handleSort('client')}>
                     <div className="flex items-center gap-1">Cliente <SortIcon k="client" /></div>
@@ -331,7 +334,10 @@ export default function OpportunitiesPage() {
                     onClick={() => handleSort('amount')}>
                     <div className="flex items-center justify-end gap-1">Importe <SortIcon k="amount" /></div>
                   </th>
-                  <th className="text-center text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">Estado</th>
+                  <th className="text-center text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
+                    onClick={() => handleSort('statusCode')}>
+                    <div className="flex items-center justify-center gap-1">Estado <SortIcon k="statusCode" /></div>
+                  </th>
                   <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
                     onClick={() => handleSort('probability')}>
                     <div className="flex items-center justify-end gap-1">Prob% <SortIcon k="probability" /></div>
@@ -340,8 +346,14 @@ export default function OpportunitiesPage() {
                     onClick={() => handleSort('weightedPipeline')}>
                     <div className="flex items-center justify-end gap-1">Ponderado <SortIcon k="weightedPipeline" /></div>
                   </th>
-                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">Owner</th>
-                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap">Empresa</th>
+                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
+                    onClick={() => handleSort('owner')}>
+                    <div className="flex items-center gap-1">Owner <SortIcon k="owner" /></div>
+                  </th>
+                  <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
+                    onClick={() => handleSort('company')}>
+                    <div className="flex items-center gap-1">Empresa <SortIcon k="company" /></div>
+                  </th>
                   <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3 whitespace-nowrap cursor-pointer hover:text-slate-700"
                     onClick={() => handleSort('expectedClosingDate')}>
                     <div className="flex items-center gap-1">Cierre <SortIcon k="expectedClosingDate" /></div>
@@ -384,7 +396,7 @@ export default function OpportunitiesPage() {
                         </p>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right">
-                        <span className="text-xs font-bold text-slate-900">{formatCurrencyCompact(opp.amount)}</span>
+                        <span className="text-xs font-bold text-slate-900" title={formatCurrency(opp.amount, opp.currency)}>{formatCurrencyCompact(opp.amount)}</span>
                         {opp.currency === 'USD' && <span className="ml-1 text-xs text-slate-400">USD</span>}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-center" onClick={e => e.stopPropagation()}>

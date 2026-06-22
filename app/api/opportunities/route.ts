@@ -47,7 +47,39 @@ export async function GET(req: NextRequest) {
       ...(lite ? { select: LIST_SELECT } : {}),
     });
 
-    return NextResponse.json(opportunities, {
+    // Budget aggregates — compute expected margin per project from budget_lines
+    type BudgetAggRow = { opportunityId: string; lineCount: bigint; costTotal: number | null; saleTotal: number | null };
+    const ids = opportunities.map(o => o.id);
+    const budgetAgg = ids.length > 0
+      ? await prisma.$queryRaw<BudgetAggRow[]>`
+          SELECT
+            "opportunityId",
+            COUNT(*)::bigint                    AS "lineCount",
+            SUM("quantity" * "unitCost")        AS "costTotal",
+            SUM(
+              CASE
+                WHEN "marginPct" >= 100 OR "marginPct" <= 0
+                  THEN "quantity" * "unitCost"
+                ELSE ("quantity" * "unitCost") / (1.0 - "marginPct" / 100.0)
+              END
+            )                                   AS "saleTotal"
+          FROM budget_lines
+          WHERE "opportunityId" = ANY(${ids})
+          GROUP BY "opportunityId"
+        `
+      : [];
+    const budgetMap = new Map(budgetAgg.map(r => [r.opportunityId, {
+      budgetLineCount: Number(r.lineCount),
+      budgetCostTotal: Number(r.costTotal  ?? 0),
+      budgetSaleTotal: Number(r.saleTotal  ?? 0),
+    }]));
+
+    const result = opportunities.map(o => ({
+      ...o,
+      ...(budgetMap.get(o.id) ?? { budgetLineCount: 0, budgetCostTotal: 0, budgetSaleTotal: 0 }),
+    }));
+
+    return NextResponse.json(result, {
       headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
     });
   } catch (error) {

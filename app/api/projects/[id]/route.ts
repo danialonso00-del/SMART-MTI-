@@ -45,6 +45,19 @@ export async function GET(
       select: { factorialProjectId: true, factorialProjectName: true, matchStatus: true },
     });
 
+    // Budget aggregates — expected margin from the budget builder
+    const budgetLines = await prisma.budgetLine.findMany({
+      where: { opportunityId: id },
+      select: { quantity: true, unitCost: true, marginPct: true },
+    });
+    function budgetPvp(cost: number, marginPct: number) {
+      if (marginPct >= 100 || marginPct <= 0) return cost;
+      return cost / (1 - marginPct / 100);
+    }
+    const budgetCostTotal = budgetLines.reduce((s, l) => s + l.quantity * l.unitCost, 0);
+    const budgetSaleTotal = budgetLines.reduce((s, l) => s + budgetPvp(l.quantity * l.unitCost, l.marginPct), 0);
+    const budgetLineCount = budgetLines.length;
+
     // Sage accounting summary — source of truth for invoiced/cost amounts
     const [sageIncomeAgg, sageExpenseAgg] = await Promise.all([
       prisma.accountingEntry.aggregate({
@@ -68,6 +81,9 @@ export async function GET(
       sageTotalIncome,
       sageTotalExpense,
       hasSageData,
+      budgetCostTotal,
+      budgetSaleTotal,
+      budgetLineCount,
       companySummary: {
         totalEmployees:     employees.length,
         totalMonthlySalary,
