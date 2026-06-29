@@ -5,6 +5,20 @@ Este proyecto ya usa Prisma con PostgreSQL. La configuración Docker levanta:
 - `app`: aplicación Next.js en `http://localhost:3000`.
 - `db`: PostgreSQL 16 con volumen persistente.
 
+## Resumen de mejoras
+
+Se ha añadido una configuración de despliegue local con Docker Compose y PostgreSQL, manteniendo la base de datos en un servicio separado y accesible por la aplicación mediante la red interna de Docker.
+
+También se ha añadido una migración inicial de Prisma para que el esquema de base de datos quede versionado en el repositorio. Por defecto, el contenedor aplica migraciones con `prisma migrate deploy`, que es una opción más adecuada para despliegues controlados que sincronizar directamente con `prisma db push`.
+
+La configuración queda preparada para separar variables locales y de producción:
+
+- `.env`: variables locales, ignoradas por Git.
+- `.env.example`: plantilla para desarrollo.
+- `.env.production.example`: plantilla orientativa para producción.
+
+El acceso inicial en local se mantiene simple para facilitar pruebas, pero debe cambiarse antes de cualquier despliegue real.
+
 ## Estado actual
 
 Se ha dejado preparada una configuración inicial con Docker y PostgreSQL para que la aplicación pueda levantarse en un entorno controlado con Docker Compose.

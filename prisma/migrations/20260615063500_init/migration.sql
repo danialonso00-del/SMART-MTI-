@@ -226,6 +226,36 @@ CREATE TABLE "accounting_entries" (
 );
 
 -- CreateTable
+CREATE TABLE "budget_lines" (
+    "id" TEXT NOT NULL,
+    "opportunityId" TEXT NOT NULL,
+    "businessLine" TEXT NOT NULL DEFAULT 'general',
+    "description" TEXT NOT NULL,
+    "quantity" DOUBLE PRECISION NOT NULL DEFAULT 1,
+    "unitCost" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "marginPct" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "notes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "budget_lines_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "revenue_phasing" (
+    "id" TEXT NOT NULL,
+    "opportunityId" TEXT NOT NULL,
+    "year" INTEGER NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "notes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "revenue_phasing_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "activity_log" (
     "id" TEXT NOT NULL,
     "entityType" TEXT NOT NULL,
@@ -330,6 +360,15 @@ CREATE INDEX "accounting_entries_accountCode_idx" ON "accounting_entries"("accou
 CREATE INDEX "accounting_entries_entryType_idx" ON "accounting_entries"("entryType");
 
 -- CreateIndex
+CREATE INDEX "budget_lines_opportunityId_idx" ON "budget_lines"("opportunityId");
+
+-- CreateIndex
+CREATE INDEX "revenue_phasing_opportunityId_idx" ON "revenue_phasing"("opportunityId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "revenue_phasing_opportunityId_year_key" ON "revenue_phasing"("opportunityId", "year");
+
+-- CreateIndex
 CREATE INDEX "activity_log_entityType_entityId_idx" ON "activity_log"("entityType", "entityId");
 
 -- CreateIndex
@@ -353,3 +392,8 @@ ALTER TABLE "billing_milestones" ADD CONSTRAINT "billing_milestones_billingConfi
 -- AddForeignKey
 ALTER TABLE "accounting_entries" ADD CONSTRAINT "accounting_entries_internalProjectId_fkey" FOREIGN KEY ("internalProjectId") REFERENCES "opportunities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE "budget_lines" ADD CONSTRAINT "budget_lines_opportunityId_fkey" FOREIGN KEY ("opportunityId") REFERENCES "opportunities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "revenue_phasing" ADD CONSTRAINT "revenue_phasing_opportunityId_fkey" FOREIGN KEY ("opportunityId") REFERENCES "opportunities"("id") ON DELETE CASCADE ON UPDATE CASCADE;
